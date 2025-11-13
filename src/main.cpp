@@ -1,32 +1,28 @@
-#include "pico/stdlib.h"
 
-#ifndef LED_DELAY_MS
-#define LED_DELAY_MS 250
-#endif
+#include <cstdio>
+#include <pico/stdlib.h>
 
-#ifndef PICO_DEFAULT_LED_PIN
-#warning blink_simple example requires a board with a regular LED
-#endif
+#include "protocol_analyzer.hpp"
 
-void led_init() {
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-}
 
-void data_init() {
+[[noreturn]] int main() {
+    stdio_init_all();
 
-}
+    ProtocolAnalyzer analyzer;
 
-void pico_set_led(bool led_on) {
-    gpio_put(PICO_DEFAULT_LED_PIN, led_on);
-}
-
-int main() {
-    pico_led_init();
     while (true) {
-        pico_set_led(true);
-        sleep_ms(LED_DELAY_MS);
-        pico_set_led(false);
-        sleep_ms(LED_DELAY_MS);
+        analyzer.process();
+
+        auto packet = analyzer.getDecodedPacket();
+        if (packet.has_value()) {
+            printf("0x%01X, 0x%03X, 0x%03X, 0x%03X, 0x%03X\n",
+                   packet->broadcast,
+                   packet->masterAddress,
+                   packet->slaveAddress,
+                   packet->control,
+                   packet->dataLength);
+        }
+
+        busy_wait_us(1);
     }
 }
