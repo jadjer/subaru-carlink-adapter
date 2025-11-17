@@ -1,28 +1,33 @@
 
 #include <cstdio>
 #include <pico/stdlib.h>
+#include <pico/status_led.h>
 
-#include "protocol_analyzer.hpp"
+#include "avc.hpp"
 
 
 [[noreturn]] int main() {
     stdio_init_all();
 
-    ProtocolAnalyzer analyzer;
+    status_led_init();
+
+    AVC avc;
+
+    status_led_set_state(true);
 
     while (true) {
-        analyzer.process();
+        auto const message = avc.readMessage();
+        if (message.has_value()) {
+            status_led_set_state(false);
 
-        auto packet = analyzer.getDecodedPacket();
-        if (packet.has_value()) {
-            printf("0x%01X, 0x%03X, 0x%03X, 0x%03X, 0x%03X\n",
-                   packet->broadcast,
-                   packet->masterAddress,
-                   packet->slaveAddress,
-                   packet->control,
-                   packet->dataLength);
+            printf("B: 0x%01X, M: 0x%03X, S: 0x%03X, C: 0x%03X, L: 0x%03X\n",
+                   message->broadcast,
+                   message->master,
+                   message->slave,
+                   message->control,
+                   message->length);
+
+            status_led_set_state(true);
         }
-
-        busy_wait_us(1);
     }
 }

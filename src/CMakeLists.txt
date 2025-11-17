@@ -4,11 +4,10 @@ set(SOURCES
         main.cpp
 
         configuration.cpp
-        protocol_analyzer.cpp
 
-        protocol/bit_decoder.cpp
-        protocol/signal_reader.cpp
-        protocol/packet_builder.cpp
+        avc.cpp
+        avc_line.cpp
+        avc_line.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
