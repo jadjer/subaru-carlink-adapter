@@ -15,11 +15,11 @@ constexpr auto MAX_MESSAGE_LEN = 32;
 
 struct Message {
     bool broadcast;
-    uint16_t master;
-    uint16_t slave;
-    uint8_t control;
-    uint8_t length;
-    uint8_t data[MAX_MESSAGE_LEN];
+    std::uint16_t master;
+    std::uint16_t slave;
+    std::uint8_t control;
+    std::uint8_t length;
+    std::uint8_t data[MAX_MESSAGE_LEN];
 };
 
 class AVC {
@@ -34,7 +34,7 @@ public:
     std::optional<Message> readMessage();
 
 private:
-    [[nodiscard]] Byte readByte(BitCount bitCount);
+    Byte readByte(BitCount bitCount);
     [[nodiscard]] bool readACK() const;
 
 private:
@@ -48,9 +48,7 @@ private:
     AVCLine *m_avcLine = nullptr;
 
 private:
-    bool m_forMe = false;
     std::uint8_t m_parityBit = 0;
-    std::uint64_t m_impulsStartTime{};
 };
 
 

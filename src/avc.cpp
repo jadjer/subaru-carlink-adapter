@@ -6,6 +6,7 @@
 
 #include <hardware/gpio.h>
 #include <hardware/timer.h>
+#include <cstdio>
 
 namespace {
     // commands
@@ -106,7 +107,9 @@ std::optional<Message> AVC::readMessage() {
 
     Message message{};
 
-    message.broadcast = readByte(1);
+    {
+        message.broadcast = readByte(1);
+    }
 
     {
         m_parityBit = 0;
@@ -117,6 +120,7 @@ std::optional<Message> AVC::readMessage() {
         message.master = (master2 << 8) | master1;
 
         if ((m_parityBit & 1) != readByte(1)) {
+            printf("Error. Incorrect master address parity bit\n");
             return std::nullopt;
         }
     }
@@ -128,19 +132,20 @@ std::optional<Message> AVC::readMessage() {
         auto const slave2 = readByte(8);
 
         if ((m_parityBit & 1) != readByte(1)) {
+            printf("Error. Incorrect slave address parity bit\n");
             return std::nullopt;
         }
 
         message.slave = (slave2 << 8) | slave1;
 
         if ((slave1 == CD_ID_1) && (slave2 == CD_ID_2)) {
-            m_forMe = true;
+            forMe = true;
         }
 
-        if (m_forMe) {
+        if (forMe) {
             sendACK();
         } else {
-            auto const ackBit = readByte(1);
+            readByte(1);
         }
     }
 
@@ -150,13 +155,14 @@ std::optional<Message> AVC::readMessage() {
         message.control = readByte(4);    // control - always 0xF
 
         if ((m_parityBit & 1) != readByte(1)) {
+            printf("Error. Incorrect control parity bit\n");
             return std::nullopt;
         }
 
-        if (m_forMe) {
+        if (forMe) {
             sendACK();
         } else {
-            auto const ackBit = readByte(1);
+            readByte(1);
         }
     }
 
@@ -166,16 +172,18 @@ std::optional<Message> AVC::readMessage() {
         message.length = readByte(8);
 
         if ((m_parityBit & 1) != readByte(1)) {
+            printf("Error. Incorrect message length parity bit\n");
             return std::nullopt;
         }
 
-        if (m_forMe) {
+        if (forMe) {
             sendACK();
         } else {
-            auto const ackBit = readByte(1);
+            readByte(1);
         }
 
         if (message.length > MAX_MESSAGE_LEN) {
+            printf("Error. Wrong message length\n");
             return std::nullopt;
         }
     }
@@ -186,13 +194,14 @@ std::optional<Message> AVC::readMessage() {
         message.data[i] = readByte(8);
 
         if ((m_parityBit & 1) != readByte(1)) {
+            printf("Error. Incorrect data[%d] parity bit\n", i);
             return std::nullopt;
         }
 
-        if (m_forMe) {
+        if (forMe) {
             sendACK();
         } else {
-            auto const ackBit = readByte(1);
+            readByte(1);
         }
     }
 
@@ -260,11 +269,13 @@ bool AVC::isStartBit() const {
         pulseWidth = time_us_64() - pulseStart;
 
         if (pulseWidth > 400) {
+            printf("Error. Start bit more than 400 uS\n");
             return false;
         }
     }
 
     if (pulseWidth < 20) {
+        printf("Error. Start bit less than 20 uS\n");
         return false;
     }
 

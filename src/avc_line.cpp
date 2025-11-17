@@ -17,15 +17,12 @@ AVCLine::AVCLine() : m_inputLevel(true) {
 
     gpio_init(GPIO_RO_PIN);
     gpio_set_dir(GPIO_RO_PIN, GPIO_IN);
-    gpio_pull_up(GPIO_RO_PIN);
 
     gpio_init(GPIO_DI_PIN);
     gpio_set_dir(GPIO_DI_PIN, GPIO_OUT);
-    gpio_pull_down(GPIO_DI_PIN);
 
     gpio_init(GPIO_DI_ENABLE);
     gpio_set_dir(GPIO_DI_ENABLE, GPIO_OUT);
-    gpio_pull_up(GPIO_DI_ENABLE);
 
 //    gpio_set_irq_enabled_with_callback(GPIO_RO_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &AVCLine::receiveCallback);
 }
@@ -37,23 +34,27 @@ AVCLine::~AVCLine() {
 }
 
 bool AVCLine::isInputSet() const {
-//    return m_inputLevel;
+    gpio_put(GPIO_DI_ENABLE, false);
+
     return not gpio_get(GPIO_RO_PIN);
 }
 
 bool AVCLine::isInputClear() const {
-//    return !m_inputLevel;
+    gpio_put(GPIO_DI_ENABLE, false);
+
     return gpio_get(GPIO_RO_PIN);
 }
 
 void AVCLine::outputSet() {
     gpio_put(GPIO_DI_ENABLE, true);
+
     gpio_put(GPIO_DI_PIN, false);
 }
 
 void AVCLine::outputReset() {
+    gpio_put(GPIO_DI_ENABLE, true);
+
     gpio_put(GPIO_DI_PIN, true);
-    gpio_put(GPIO_DI_ENABLE, false);
 }
 
 void AVCLine::receiveCallback(uint gpio, std::uint32_t events) {
@@ -70,4 +71,4 @@ void AVCLine::receiveCallback(uint gpio, std::uint32_t events) {
     }
 }
 
-AVCLine* AVCLine::m_instance = nullptr;
+AVCLine *AVCLine::m_instance = nullptr;
