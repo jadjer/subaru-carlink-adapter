@@ -5,82 +5,50 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
-#include <vector>
+#include <expected>
 
-#include "Message.hpp"
-
-enum class Bit {
-    BIT_UNKNOWN = -1,
-    BIT_0 = 0,
-    BIT_1 = 1,
+enum class BitType {
+    BIT_0     = 0x00,
+    BIT_1     = 0x01,
+    START_BIT = 0x10,
 };
 
-using Bits = std::vector<Bit>;
-
-struct Bitstream {
-    Bits data;
-    Bit parity;
+enum class ReadError {
+    BIT_TYPE_WRONG,
 };
 
-using Pin = std::uint8_t;
+using Pin  = std::uint8_t;
+using Time = std::uint64_t;
 
 class Driver {
 public:
-    Driver(Pin rx, Pin tx, Pin enable);
+    Driver(Pin rx, Pin tx, Pin enable) noexcept;
 
 public:
-    void setRxPin(Pin pin);
+    auto enable() const -> void;
 
-    void setTxPin(Pin pin);
-
-    void setEnablePin(Pin pin);
+    auto disable() const -> void;
 
 public:
-    void enable();
+    [[nodiscard]] auto isEnabled() const -> bool;
 
-    void disable();
+    [[nodiscard]] auto isBusLow() const -> bool;
+
+    [[nodiscard]] auto isBusHigh() const -> bool;
 
 public:
-    auto readMessage() -> std::optional<Message>;
+    [[nodiscard]] auto readBit() const -> std::expected<BitType, ReadError>;
 
 public:
-    [[nodiscard]] bool isEnabled() const;
+    auto writeBit(BitType value) const -> void;
 
 private:
-    [[nodiscard]] auto readStartBit() const -> bool;
+    auto waitBusLow() const -> void;
 
-    [[nodiscard]] auto readBroadCastBit() const -> Bit;
-
-    [[nodiscard]] auto readMasterAddress() const -> std::uint16_t;
-
-    [[nodiscard]] auto readSlaveAddress() const -> std::uint16_t;
-
-    [[nodiscard]] auto readControlBits() const -> std::uint8_t;
-
-    [[nodiscard]] auto readDataLength() const -> std::uint8_t;
-
-    [[nodiscard]] auto readData() const -> std::uint8_t;
-
-    [[nodiscard]] auto readAcknowledge() const -> Bit;
-
-    [[nodiscard]] auto readParity() const -> Bit;
-
-    [[nodiscard]] auto readBit() const -> Bit;
-
-    [[nodiscard]] auto readBits(std::size_t count) const -> Bitstream;
+    auto waitBusHigh() const -> void;
 
 private:
-    [[nodiscard]] auto inputIsClear() const -> bool;
-
-    [[nodiscard]] auto inputIsSet() const -> bool;
-
-private:
-    void reconfigurePins() const;
-
-private:
-    Pin m_rx;
-    Pin m_tx;
-    Pin m_enable;
-    bool m_isEnabled;
+    Pin const m_rxPin;
+    Pin const m_txPin;
+    Pin const m_enablePin;
 };

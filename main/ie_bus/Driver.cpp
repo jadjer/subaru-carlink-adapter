@@ -4,213 +4,129 @@
 
 #include "Driver.hpp"
 
-#include <esp_timer.h>
-#include <vector>
+#include <chrono>
+#include <thread>
 #include <driver/gpio.h>
+#include <esp_timer.h>
 
 namespace {
-    auto constexpr START_BIT_PULSE_WIDTH = 170;
-    auto constexpr BIT_0_PULSE_WIDTH = 33;
-    auto constexpr BIT_1_PULSE_WIDTH = 20;
+    auto constexpr START_BIT_PULSE_WIDTH     = 170;
+    auto constexpr BIT_0_PULSE_WIDTH         = 33;
+    auto constexpr BIT_1_PULSE_WIDTH         = 20;
     auto constexpr BIT_PULSE_WIDTH_THRESHOLD = 5;
     auto constexpr START_BIT_MIN_PULSE_WIDTH = START_BIT_PULSE_WIDTH - BIT_PULSE_WIDTH_THRESHOLD;
     auto constexpr START_BIT_MAX_PULSE_WIDTH = START_BIT_PULSE_WIDTH + BIT_PULSE_WIDTH_THRESHOLD;
-    auto constexpr BIT_0_MIN_PULSE_WIDTH = BIT_0_PULSE_WIDTH - BIT_PULSE_WIDTH_THRESHOLD;
-    auto constexpr BIT_0_MAX_PULSE_WIDTH = BIT_0_PULSE_WIDTH + BIT_PULSE_WIDTH_THRESHOLD;
-    auto constexpr BIT_1_MIN_PULSE_WIDTH = BIT_1_PULSE_WIDTH - BIT_PULSE_WIDTH_THRESHOLD;
-    auto constexpr BIT_1_MAX_PULSE_WIDTH = BIT_1_PULSE_WIDTH + BIT_PULSE_WIDTH_THRESHOLD;
-}
+    auto constexpr BIT_0_MIN_PULSE_WIDTH     = BIT_0_PULSE_WIDTH - BIT_PULSE_WIDTH_THRESHOLD;
+    auto constexpr BIT_0_MAX_PULSE_WIDTH     = BIT_0_PULSE_WIDTH + BIT_PULSE_WIDTH_THRESHOLD;
+    auto constexpr BIT_1_MIN_PULSE_WIDTH     = BIT_1_PULSE_WIDTH - BIT_PULSE_WIDTH_THRESHOLD;
+    auto constexpr BIT_1_MAX_PULSE_WIDTH     = BIT_1_PULSE_WIDTH + BIT_PULSE_WIDTH_THRESHOLD;
+} // namespace
 
-Driver::Driver(Pin const rx, Pin const tx, Pin const enable) : m_rx(rx), m_tx(tx), m_enable(enable),
-                                                               m_isEnabled(false) {
-    reconfigurePins();
-}
-
-void Driver::setRxPin(Pin const pin) {
-    m_rx = pin;
-    reconfigurePins();
-}
-
-void Driver::setTxPin(Pin const pin) {
-    m_tx = pin;
-    reconfigurePins();
-}
-
-void Driver::setEnablePin(Pin const pin) {
-    m_enable = pin;
-    reconfigurePins();
-}
-
-void Driver::enable() {
-    gpio_set_level(static_cast<gpio_num_t>(m_enable), 1);
-    m_isEnabled = true;
-}
-
-auto Driver::readMessage() -> std::optional<Message> {
-    Message message{};
-
-    auto const isStartBit = readStartBit();
-    if (not isStartBit) {
-        return std::nullopt;
-    }
-
-    message.isBroadcast = readBroadCastBit();
-
-
-    message.masterAddress = readBits(12);
-
-
-    return message;
-}
-
-bool Driver::isEnabled() const {
-    return m_isEnabled;
-}
-
-auto Driver::readStartBit() const -> bool {
-    while (inputIsSet()) {
-    }
-
-    auto const pulseStartTime = esp_timer_get_time();
-
-    while (inputIsClear()) {
-        auto const currentTime = esp_timer_get_time();
-        auto const pulseWidth = currentTime - pulseStartTime;
-
-        if (pulseWidth > START_BIT_MAX_PULSE_WIDTH) {
-            return false;
-        }
-    }
-
-    auto const pulseStopTime = esp_timer_get_time();
-    auto const pulseWith = pulseStopTime - pulseStartTime;
-
-    if (pulseWith < START_BIT_MIN_PULSE_WIDTH or pulseWith > START_BIT_MAX_PULSE_WIDTH) {
-        return false;
-    }
-
-    return true;
-}
-
-auto Driver::readBroadCastBit() const -> Bit {
-    auto const isBroadCast = readBit();
-    return isBroadCast;
-}
-
-auto Driver::readMasterAddress() const -> std::uint16_t {
-}
-
-auto Driver::readSlaveAddress() const -> std::uint16_t {
-}
-
-auto Driver::readControlBits() const -> std::uint8_t {
-}
-
-auto Driver::readDataLength() const -> std::uint8_t {
-}
-
-auto Driver::readData() const -> std::uint8_t {
-}
-
-auto Driver::readAcknowledge() const -> Bit {
-}
-
-auto Driver::readParity() const -> Bit {
-}
-
-auto Driver::readBit() const -> Bit {
-    while (inputIsSet()) {
-    }
-
-    auto const pulseStartTime = esp_timer_get_time();
-
-    while (inputIsClear()) {
-    }
-
-    auto const pulseStopTime = esp_timer_get_time();
-    auto const pulseWith = pulseStopTime - pulseStartTime;
-
-    if (pulseWith >= BIT_0_MIN_PULSE_WIDTH and pulseWith <= BIT_0_MAX_PULSE_WIDTH) {
-        return Bit::BIT_0;
-    }
-
-    if (pulseWith >= BIT_1_MIN_PULSE_WIDTH and pulseWith <= BIT_1_MAX_PULSE_WIDTH) {
-        return Bit::BIT_1;
-    }
-
-    return Bit::BIT_UNKNOWN;
-}
-
-auto Driver::readBits(std::size_t const count) const -> Bitstream {
-    Bitstream bits;
-    bits.data.reserve(count);
-
-    for (auto i = 0; i < count; i++) {
-        bits.data.push_back(readBit());
-        bits.parity ^= bits.data.back();
-    }
-
-    // for (size_t i = 0; i < count; i++) {
-    //     uint8_t bit = 0;
-    //
-    //     // Wait until rising edge of new bit
-    //     while (gpio_get_level(static_cast<gpio_num_t>(m_rx)) == 0) {
-    //     }
-    //
-    //     // Reset timer to measure bit length
-    //     int64_t startTime = esp_timer_get_time();
-    //
-    //     // Wait until falling edge
-    //     while (gpio_get_level(static_cast<gpio_num_t>(m_rx)) == 1) {
-    //     }
-    //
-    //     int64_t duration = esp_timer_get_time() - startTime;
-    //
-    //     // Compare duration to determine if it's a 1 or 0
-    //     if (duration < 26) {
-    //         // 26us threshold
-    //         bit = 1;
-    //     }
-    //
-    //     bits.push_back(bit);
-    // }
-
-    return bits;
-}
-
-auto Driver::inputIsClear() const -> bool {
-    return gpio_get_level(static_cast<gpio_num_t>(m_rx)) == 0;
-}
-
-auto Driver::inputIsSet() const -> bool {
-    return gpio_get_level(static_cast<gpio_num_t>(m_rx)) == 1;
-}
-
-void Driver::reconfigurePins() const {
+Driver::Driver(Pin const rx, Pin const tx, Pin const enable) noexcept : m_rxPin(rx), m_txPin(tx), m_enablePin(enable) {
     gpio_config_t const receiverConfiguration = {
-        .pin_bit_mask = (1ULL << m_rx),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pin_bit_mask = (1ULL << m_rxPin),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_ANYEDGE,
+        .intr_type    = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&receiverConfiguration);
 
     gpio_config_t const transmitterConfiguration = {
-        .pin_bit_mask = (1ULL << m_tx),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pin_bit_mask = (1ULL << m_txPin),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&transmitterConfiguration);
 
     gpio_config_t const enableConfiguration = {
-        .pin_bit_mask = (1ULL << m_tx),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pin_bit_mask = (1ULL << m_enablePin),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&enableConfiguration);
+}
+
+auto Driver::enable() const -> void {
+    gpio_set_level(static_cast<gpio_num_t>(m_enablePin), 1);
+}
+
+auto Driver::disable() const -> void {
+    gpio_set_level(static_cast<gpio_num_t>(m_enablePin), 0);
+}
+
+auto Driver::isEnabled() const -> bool {
+    return gpio_get_level(static_cast<gpio_num_t>(m_enablePin));
+}
+
+auto Driver::isBusLow() const -> bool {
+    return gpio_get_level(static_cast<gpio_num_t>(m_rxPin)) == 0;
+}
+
+auto Driver::isBusHigh() const -> bool {
+    return gpio_get_level(static_cast<gpio_num_t>(m_rxPin)) == 1;
+}
+
+auto Driver::readBit() const -> std::expected<BitType, ReadError> {
+    waitBusHigh();
+
+    auto const pulseStartTime = esp_timer_get_time();
+
+    waitBusLow();
+
+    auto const pulseStopTime = esp_timer_get_time();
+    auto const pulseWidth    = pulseStopTime - pulseStartTime;
+
+    if (pulseWidth >= START_BIT_MIN_PULSE_WIDTH and pulseWidth <= START_BIT_MAX_PULSE_WIDTH) {
+        return BitType::START_BIT;
+    }
+
+    if (pulseWidth >= BIT_0_MIN_PULSE_WIDTH and pulseWidth <= BIT_0_MAX_PULSE_WIDTH) {
+        return BitType::BIT_0;
+    }
+
+    if (pulseWidth >= BIT_1_MIN_PULSE_WIDTH and pulseWidth <= BIT_1_MAX_PULSE_WIDTH) {
+        return BitType::BIT_1;
+    }
+
+    return std::unexpected(ReadError::BIT_TYPE_WRONG);
+}
+
+auto Driver::writeBit(BitType bit) const -> void {
+    gpio_set_level(static_cast<gpio_num_t>(m_txPin), 1);
+
+    auto const startTime = esp_timer_get_time();
+
+    while (true) {
+        auto const currentTime = esp_timer_get_time();
+        auto const pulseWidth = currentTime - startTime;
+
+        if (bit == BitType::START_BIT and pulseWidth >= START_BIT_PULSE_WIDTH) {
+            break;
+        }
+        if (bit == BitType::BIT_0 and pulseWidth >= BIT_0_PULSE_WIDTH) {
+            break;
+        }
+        if (bit == BitType::BIT_1 and pulseWidth >= BIT_1_PULSE_WIDTH) {}
+
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+
+    gpio_set_level(static_cast<gpio_num_t>(m_txPin), 0);
+}
+
+auto Driver::waitBusLow() const -> void {
+    while (isBusHigh()) {
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+}
+
+auto Driver::waitBusHigh() const -> void {
+    while (isBusLow()) {
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
 }

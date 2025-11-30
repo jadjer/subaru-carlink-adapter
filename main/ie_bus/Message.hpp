@@ -6,11 +6,14 @@
 
 #include <cstdint>
 
+using Byte = std::uint8_t;
+using Address = std::uint16_t;
+
 struct Message {
     bool isBroadcast;
-    std::uint16_t masterAddress;
-    std::uint16_t slaveAddress;
-    std::uint8_t control;
-    std::uint8_t dataLength;
-    std::uint8_t data[32];
+    Address master;
+    Address slave;
+    Byte control;
+    Byte dataLength;
+    Byte data[32];
 };
