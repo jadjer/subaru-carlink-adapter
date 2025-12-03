@@ -4,10 +4,12 @@
 
 #pragma once
 
-#include <expected>
+#include <optional>
+#include <thread>
 
 #include "Driver.hpp"
 #include "Message.hpp"
+#include "Queue.hpp"
 
 
 enum class MessageError {
@@ -30,18 +32,29 @@ enum class MessageError {
  * IEBus Controller
  */
 class Controller {
+private:
+    using Thread       = std::thread;
+    using MessageQueue = Queue<Message>;
+
 public:
     Controller(Driver::Pin rx, Driver::Pin tx, Driver::Pin enable, Address address);
+    ~Controller();
+
+public:
+    Controller(Controller const&)                = delete;
+    Controller& operator=(Controller const&)     = delete;
+    Controller(Controller&&) noexcept            = delete;
+    Controller& operator=(Controller&&) noexcept = delete;
 
 public:
     /**
-     *
+     * Enable IEBus driver
      */
-    auto enable() const -> void;
+    auto enable() -> void;
     /**
-     *
+     * Enable IEBus driver
      */
-    auto disable() const -> void;
+    auto disable() -> void;
 
 public:
     /**
@@ -51,46 +64,48 @@ public:
     [[nodiscard]] auto isEnabled() const -> bool;
 
 public:
+    [[nodiscard]] auto readMessage() const -> std::optional<Message>;
+    [[nodiscard]] auto writeMessage(Message const& message) const -> bool;
+
+public:
     /**
-     *
+     * Get message from queue
      * @return
      */
-    [[nodiscard]] auto readMessage() const -> std::expected<Message, MessageError>;
+    [[nodiscard]] auto getMessage() -> std::optional<Message>;
+    auto putMessage(Message const& message) -> void;
+
+private:
+    auto loop() -> void;
+
+
 
 private:
     /**
-     *
-     * @return
+     * Check parity for calculated parity
+     * @param data Data for check
+     * @param size Data size
+     * @param parity Etalon parity
+     * @return Comparison result
      */
-    [[nodiscard]] auto readBroadcastBit() const -> std::expected<bool, MessageError>;
+    static auto checkParity(Data data, Size size, Bit parity) -> Bit;
     /**
-     *
-     * @param bitsCount
-     * @return
+     * Calculate parity for calculated parity
+     * @param data Data for calculate
+     * @param size Data size
+     * @return Parity bit
      */
-    [[nodiscard]] auto readData(std::size_t bitsCount) const -> std::expected<std::uint32_t, MessageError>;
-
-private:
-    /**
-     *
-     * @return
-     */
-    [[nodiscard]] auto writeAck() const -> bool;
-    /**
-     *
-     * @return
-     */
-    [[nodiscard]] auto skipAck() const -> bool;
-    /**
-     *
-     * @param parity
-     * @return
-     */
-    [[nodiscard]] auto checkParity(std::uint8_t parity) const -> bool;
+    static auto calculateParity(Data data, Size size) -> Bit;
 
 private:
     Address const m_address;
 
 private:
     Driver m_driver;
+    Thread m_processThread;
+    MessageQueue m_receiveQueue;
+    MessageQueue m_transmitQueue;
+
+private:
+    Message m_currentMessage = Message();
 };

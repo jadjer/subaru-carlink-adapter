@@ -5,15 +5,17 @@
 #include <esp_log.h>
 
 #include "ie_bus/Controller.hpp"
+#include "ie_bus/Driver.hpp"
 
 auto constexpr TAG             = "CarLink";
 auto constexpr BUS_RX          = 8;
 auto constexpr BUS_TX          = 3;
 auto constexpr BUS_ENABLE      = 9;
 auto constexpr OUTPUT_ENABLE   = 6;
-auto constexpr BUS_DEVICE_ADDR = 0x140;
+// auto constexpr BUS_DEVICE_ADDR = 0x140;
+auto constexpr BUS_DEVICE_ADDR = 0x940;
 
-const char* toString(MessageError error) {
+auto errorToString(MessageError const error) {
     switch (error) {
     case MessageError::BUS_READ_ERROR:
         return "BUS_READ_ERROR";
@@ -49,13 +51,14 @@ extern "C" [[noreturn]] void app_main() {
     controller.enable();
 
     while (true) {
-        auto const message = controller.readMessage();
-        if (message) {
-            ESP_LOGI(TAG, "%s - %d - %d - %d - %d", message->isBroadcast ? "0" : "1", message->master, message->slave,
-                message->control, message->dataLength);
-            ESP_LOG_BUFFER_HEX(TAG, message->data, message->dataLength);
-        } else {
-            ESP_LOGE(TAG, "%s", toString(message.error()));
+        auto const optionalMessage = controller.readMessage();
+        if (optionalMessage.has_value()) {
+            auto const message = optionalMessage.value();
+
+            ESP_LOGI(TAG, "%01X %03X %03X %01X %d", message.broadcast, message.master, message.slave, message.control,
+                message.dataLength);
+            ESP_LOG_BUFFER_HEX(TAG, message.data, message.dataLength);
+            ESP_LOGI(TAG, "--------------");
         }
     }
 }

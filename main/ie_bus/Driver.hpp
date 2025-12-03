@@ -8,27 +8,26 @@
 #include <optional>
 
 
+enum class AcknowledgmentType {
+    ACK = 0,
+    NAK = 1,
+};
+
+using Bit  = std::uint8_t;
+using Data = std::uint16_t;
+using Size = std::size_t;
+
 /**
  * @class Driver
  * IEBus Driver
  */
 class Driver {
 public:
-    using Bit = bool;
-    using Pin = std::uint8_t;
+    using Pin  = std::uint8_t;
+    using Time = std::int64_t;
 
 public:
     Driver(Pin rx, Pin tx, Pin enable) noexcept;
-
-public:
-    /**
-     * Enable IEBus transmitter
-     */
-    auto enable() const -> void;
-    /**
-     * Disable IEBus transmitter
-     */
-    auto disable() const -> void;
 
 public:
     /**
@@ -37,45 +36,83 @@ public:
      */
     [[nodiscard]] auto isEnabled() const -> bool;
     /**
-     * IEBus is low
+     * Check if IEBus is high
+     * @return bool
+     */
+    [[nodiscard]] auto isBusHigh() const -> bool;
+    /**
+     * Check if IEBus is low
      * @return bool
      */
     [[nodiscard]] auto isBusLow() const -> bool;
     /**
-     * IEBus is high
+     * Check if bus is free
      * @return bool
      */
-    [[nodiscard]] auto isBusHigh() const -> bool;
+    [[nodiscard]] auto isBusFree() const -> bool;
 
 public:
     /**
-     * Wait until start bit
+     * Enable IEBus transmitter
      */
-    auto waitStartBit() const -> void;
+    auto enable() -> void;
+    /**
+     * Disable IEBus transmitter
+     */
+    auto disable() -> void;
 
 public:
     /**
-     * Read single bit from the IEBus
-     * Variants: Start Bit, Bit 0, Bit 1
-     * If the pulse duration does not match the specified ones, std::nullopt is returned.
-     * @return Optional Bit Type
+     * Send start bit to IEBus
      */
-    [[nodiscard]] auto readBit() const -> std::optional<Bit>;
+    [[nodiscard]] auto receiveStartBit() const -> bool;
+    /**
+     * Get single bit from IEBus
+     * @return Data bit
+     */
+    [[nodiscard]] auto receiveBit() const -> Bit;
+    /**
+     * Get bits data from IEBus
+     * @param numBits data size
+     * @return Data bits
+     */
+    [[nodiscard]] auto receiveBits(Size numBits) const -> Data;
+    /**
+     * Get start bit from IEBus
+     * @return
+     */
+    auto transmitStartBit() const -> void;
+    /**
+     * Send bit to IEBus
+     * @param bit single bit data
+     */
+    auto transmitBit(Bit bit) const -> void;
+    /**
+     * Send data bits to IEBus
+     * @param data data bits
+     * @param numBits data size
+     */
+    auto transmitBits(Data data, Size numBits) const -> void;
 
 public:
     /**
-     * Write single bit to the IEBus
-     * @param value Type of bit
+     * Wait ack from IEBus
+     * @return Ack value
      */
-    auto writeBit(Bit value) const -> void;
+    [[nodiscard]] auto waitAckBit() const -> AcknowledgmentType;
+    /**
+     * Send ack to IEBus
+     * @param ack ack value
+     */
+    auto sendAckBit(AcknowledgmentType ack) const -> void;
 
 private:
     /**
-     * Wait until the IEBus logic level is low
+     * Wait before IEBus is change to low level
      */
     auto waitBusLow() const -> void;
     /**
-     * Wait until the IEBus logic level is high
+     * Wait before IEBus is change to high level
      */
     auto waitBusHigh() const -> void;
 
@@ -83,4 +120,7 @@ private:
     Pin const m_rxPin;
     Pin const m_txPin;
     Pin const m_enablePin;
+
+private:
+    bool m_isEnabled = false;
 };

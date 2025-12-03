@@ -5,19 +5,51 @@
 #include "Controller.hpp"
 
 #include <esp_log.h>
+#include <esp_timer.h>
 
 namespace {
-    auto constexpr TAG = "IEBusController";
-}
+    auto constexpr TAG             = "IEBusController";
+    Size constexpr MAX_DATA_LENGTH = 32;
+
+    Driver::Time getTimeUs() {
+        return esp_timer_get_time();
+    }
+
+    void delayUs(Driver::Time const delay) {
+        auto const startTime = getTimeUs();
+
+        bool enable = true;
+        while (enable) {
+            auto const currentTime = getTimeUs();
+            auto const differenceTime = currentTime - startTime;
+            auto const isTimeOut = differenceTime >= delay;
+
+            if (isTimeOut) {
+                enable = false;
+            }
+        }
+    }
+} // namespace
 
 Controller::Controller(Driver::Pin const rx, Driver::Pin const tx, Driver::Pin const enable, Address const address)
     : m_address(address), m_driver(rx, tx, enable) {}
 
-auto Controller::enable() const -> void {
-    m_driver.enable();
+Controller::~Controller() {
+    disable();
+
+    // if (m_processThread.joinable()) {
+    //     m_processThread.join();
+    // }
 }
 
-auto Controller::disable() const -> void {
+auto Controller::enable() -> void {
+    m_driver.enable();
+
+    // m_processThread = std::thread(&Controller::loop, this);
+    // m_processThread.detach();
+}
+
+auto Controller::disable() -> void {
     m_driver.disable();
 }
 
@@ -25,140 +57,247 @@ auto Controller::isEnabled() const -> bool {
     return m_driver.isEnabled();
 }
 
-auto Controller::readMessage() const -> std::expected<Message, MessageError> {
-    Message message{};
+auto Controller::getMessage() -> std::optional<Message> {
+    if (m_receiveQueue.isEmpty()) {
+        return std::nullopt;
+    }
 
-    auto readField = [&](auto& field, std::size_t const bits) {
-        auto const data = readData(bits);
-        if (not data) {
-            return false;
+    auto const message = m_receiveQueue.pop();
+
+    return message;
+}
+
+auto Controller::putMessage(Message const& message) -> void {
+    m_transmitQueue.push(message);
+}
+
+auto Controller::loop() -> void {
+    while (isEnabled()) {
+        auto const optionalMessage = readMessage();
+        if (optionalMessage.has_value()) {
+            m_receiveQueue.push(optionalMessage.value());
         }
-        field = *data;
-        return true;
-    };
 
-    auto handleAck = [&] { return not message.isBroadcast and message.slave == m_address ? writeAck() : skipAck(); };
+        if (not m_transmitQueue.isEmpty()) {
+            auto const message = m_transmitQueue.pop();
+            auto const isWritten = writeMessage(message);
 
-    m_driver.waitStartBit();
-
-    auto const isBroadcast = readBroadcastBit();
-    if (not isBroadcast) {
-        return std::unexpected(MessageError::BROADCAST_BIT_READ_ERROR);
-    }
-
-    message.isBroadcast = *isBroadcast;
-
-    if (not readField(message.master, 12)) {
-        return std::unexpected(MessageError::MASTER_ADDRESS_READ_ERROR);
-    }
-
-    if (not readField(message.slave, 12)) {
-        return std::unexpected(MessageError::SLAVE_ADDRESS_READ_ERROR);
-    }
-    if (not handleAck()) {
-        return std::unexpected(MessageError::ACKNOWLEDGE_ERROR);
-    }
-
-    if (not readField(message.control, 4)) {
-        return std::unexpected(MessageError::CONTROL_DATA_READ_ERROR);
-    }
-    if (not handleAck()) {
-        return std::unexpected(MessageError::ACKNOWLEDGE_ERROR);
-    }
-
-    if (not readField(message.dataLength, 8)) {
-        return std::unexpected(MessageError::DATA_LENGTH_READ_ERROR);
-    }
-    if (not handleAck()) {
-        return std::unexpected(MessageError::ACKNOWLEDGE_ERROR);
-    }
-
-    for (std::size_t i = 0; i < message.dataLength; ++i) {
-        if (not readField(message.data[i], 8)) {
-            return std::unexpected(MessageError::DATA_READ_ERROR);
+            if (not isWritten) {
+                m_transmitQueue.push(message);
+            }
         }
-        if (not handleAck()) {
-            return std::unexpected(MessageError::ACKNOWLEDGE_ERROR);
+    }
+}
+
+auto Controller::readMessage() const -> std::optional<Message> {
+    if (not m_driver.receiveStartBit()) {
+        return std::nullopt;
+    }
+
+    Message message = {};
+
+    {
+        if (auto const broadcastBit = m_driver.receiveBit(); broadcastBit == 0) {
+            message.broadcast = BroadcastType::BROADCAST;
+        } else {
+            message.broadcast = BroadcastType::TO_DEVICE;
+        }
+    }
+
+    {
+        message.master = m_driver.receiveBits(12);
+
+        auto const masterParityBit = m_driver.receiveBit();
+        if (auto const isParityValid = checkParity(message.master, 12, masterParityBit); not isParityValid) {
+            ESP_LOGW(TAG, "Master address parity error");
+            return std::nullopt;
+        }
+    }
+
+    {
+        message.slave = m_driver.receiveBits(12);
+
+        auto const parityBit     = m_driver.receiveBit();
+        auto const isParityValid = checkParity(message.slave, 12, parityBit);
+
+        auto const slaveAck = m_driver.receiveBit();
+        auto const isAnswer = message.broadcast == BroadcastType::TO_DEVICE and message.slave == m_address and slaveAck;
+
+        if (not isParityValid) {
+            if (isAnswer) {
+                m_driver.sendAckBit(AcknowledgmentType::NAK);
+            }
+
+            ESP_LOGW(TAG, "Slave address parity error");
+            return std::nullopt;
+        }
+
+        if (isAnswer) {
+            m_driver.sendAckBit(AcknowledgmentType::ACK);
+        }
+    }
+
+    {
+        message.control = m_driver.receiveBits(4);
+
+        auto const parityBit     = m_driver.receiveBit();
+        auto const isParityValid = checkParity(message.control, 4, parityBit);
+
+        auto const slaveAck = m_driver.receiveBit();
+        auto const isAnswer = message.broadcast == BroadcastType::TO_DEVICE and message.slave == m_address and slaveAck;
+
+        if (not isParityValid) {
+            if (isAnswer) {
+                m_driver.sendAckBit(AcknowledgmentType::NAK);
+            }
+
+            ESP_LOGW(TAG, "Control parity error");
+            return std::nullopt;
+        }
+
+        if (isAnswer) {
+            m_driver.sendAckBit(AcknowledgmentType::ACK);
+        }
+    }
+
+    {
+        message.dataLength = m_driver.receiveBits(8);
+
+        auto const parityBit     = m_driver.receiveBit();
+        auto const isParityValid = checkParity(message.dataLength, 8, parityBit);
+
+        auto const slaveAck = m_driver.receiveBit();
+        auto const isAnswer = message.broadcast == BroadcastType::TO_DEVICE and message.slave == m_address and slaveAck;
+
+        if (auto const isDataLengthValid = message.dataLength <= MAX_DATA_LENGTH;
+            not isParityValid or not isDataLengthValid) {
+            if (isAnswer) {
+                m_driver.sendAckBit(AcknowledgmentType::NAK);
+            }
+
+            if (not isParityValid) {
+                ESP_LOGW(TAG, "Length parity error");
+            }
+            if (not isDataLengthValid) {
+                ESP_LOGW(TAG, "Data length too large: %u", message.dataLength);
+            }
+
+            return std::nullopt;
+        }
+
+        if (isAnswer) {
+            m_driver.sendAckBit(AcknowledgmentType::ACK);
+        }
+    }
+
+    for (Size i = 0; i < message.dataLength; i++) {
+        message.data[i] = m_driver.receiveBits(8);
+
+        auto const parityBit     = m_driver.receiveBit();
+        auto const isParityValid = checkParity(message.data[i], 8, parityBit);
+
+        auto const slaveAck = m_driver.receiveBit();
+        auto const isAnswer = message.broadcast == BroadcastType::TO_DEVICE and message.slave == m_address and slaveAck;
+
+        if (not isParityValid) {
+            if (isAnswer) {
+                m_driver.sendAckBit(AcknowledgmentType::NAK);
+            }
+
+            ESP_LOGW(TAG, "Data byte %u parity error", i);
+            return std::nullopt;
+        }
+
+        if (isAnswer) {
+            m_driver.sendAckBit(AcknowledgmentType::ACK);
         }
     }
 
     return message;
 }
 
-auto Controller::readBroadcastBit() const -> std::expected<bool, MessageError> {
-    auto const optionalBit = m_driver.readBit();
-    if (not optionalBit) {
-        ESP_LOGE(TAG, "Read broadcast bit error");
-        return std::unexpected(MessageError::BUS_READ_ERROR);
+auto Controller::writeMessage(Message const& message) const -> bool {
+    // Ждём освобождения шины
+    while (not m_driver.isBusFree()) {
+        delayUs(100);
     }
 
-    auto const bit = optionalBit.value();
+    m_driver.transmitStartBit();
 
-    return bit;
-}
-
-auto Controller::readData(std::size_t const bitsCount) const -> std::expected<std::uint32_t, MessageError> {
-    if (bitsCount > 32) {
-        ESP_LOGE(TAG, "Bits count greater than 32");
-        return std::unexpected(MessageError::BITS_COUNT_ERROR);
+    if (message.broadcast == BroadcastType::BROADCAST) {
+        m_driver.transmitBit(0);
+    } else {
+        m_driver.transmitBit(1);
     }
 
-    std::uint32_t data  = 0;
-    std::uint8_t parity = 0;
+    {
+        m_driver.transmitBits(message.master, 12);
 
-    for (std::size_t i = 0; i < bitsCount; ++i) {
-        auto const optionalBit = m_driver.readBit();
-        if (not optionalBit) {
-            ESP_LOGE(TAG, "Read bit error");
-            return std::unexpected(MessageError::BUS_READ_ERROR);
+        auto const parityBit = calculateParity(message.master, 12);
+        m_driver.transmitBit(parityBit);
+    }
+
+    {
+        m_driver.transmitBits(message.slave, 12);
+
+        auto const parityBit = calculateParity(message.slave, 12);
+        m_driver.transmitBit(parityBit);
+
+        if (auto const ackBit = m_driver.waitAckBit(); ackBit == AcknowledgmentType::NAK) {
+            ESP_LOGE(TAG, "No ACK for address");
+            return false;
         }
-
-        auto const bit = optionalBit.value();
-
-        data = data << 1 | bit;
-        parity += bit;
     }
 
-    if (not checkParity(parity)) {
-        ESP_LOGE(TAG, "Check parity error");
-        return std::unexpected(MessageError::BIT_PARITY_ERROR);
+    {
+        m_driver.transmitBits(message.control, 4);
+
+        auto const parityBit = calculateParity(message.control, 4);
+        m_driver.transmitBit(parityBit);
+
+        if (auto const ackBit = m_driver.waitAckBit(); ackBit == AcknowledgmentType::NAK) {
+            ESP_LOGE(TAG, "No ACK for control");
+            return false;
+        }
     }
 
-    return data;
-}
+    {
+        m_driver.transmitBits(message.dataLength, 8);
 
-auto Controller::writeAck() const -> bool {
-    auto const optionalBit = m_driver.readBit();
-    if (not optionalBit) {
-        return false;
+        auto const parityBit = calculateParity(message.dataLength, 8);
+        m_driver.transmitBit(parityBit);
+
+        if (auto const ackBit = m_driver.waitAckBit(); ackBit == AcknowledgmentType::NAK) {
+            ESP_LOGE(TAG, "No ACK for data length");
+            return false;
+        }
     }
 
-    auto const bit = optionalBit.value();
+    for (Size i = 0; i < message.dataLength; i++) {
+        m_driver.transmitBits(message.data[i], 8);
 
-    if (bit == 1) {
-        m_driver.writeBit(0);
+        auto const parityBit = calculateParity(message.data[i], 8);
+        m_driver.transmitBit(parityBit);
+
+        if (auto const ackBit = m_driver.waitAckBit(); ackBit == AcknowledgmentType::NAK) {
+            ESP_LOGE(TAG, "No ACK for data byte %u", i);
+            return false;
+        }
     }
 
     return true;
 }
 
-auto Controller::skipAck() const -> bool {
-    auto const optionalBit = m_driver.readBit();
-    if (not optionalBit) {
-        return false;
-    }
-
-    return true;
+auto Controller::checkParity(Data const data, Size const size, Bit const parity) -> Bit {
+    return calculateParity(data, size) == parity;
 }
 
-auto Controller::checkParity(std::uint8_t const parity) const -> bool {
-    auto const optionalBit = m_driver.readBit();
-    if (not optionalBit) {
-        ESP_LOGE(TAG, "Read parity bit error");
-        return false;
+auto Controller::calculateParity(Data const data, Size const size) -> Bit {
+    Bit parity = 0;
+
+    for (auto i = 0; i < size; i++) {
+        parity ^= data >> i & 1;
     }
 
-    auto const bit = optionalBit.value();
-
-    return parity % 2 == bit;
+    return parity;
 }
