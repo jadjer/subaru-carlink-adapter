@@ -1,10 +1,15 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-set(SOURCES
-        main.cpp
-
-        ie_bus/Driver.cpp
-        ie_bus/Controller.cpp
+set(INCLUDES
+        "."
 )
 
-idf_component_register(SRCS ${SOURCES} INCLUDE_DIRS ".")
+set(SOURCES
+        main.cpp
+)
+
+set(PRIV_REQUIRES
+        esp32-iebus
+)
+
+idf_component_register(INCLUDE_DIRS ${INCLUDES} SRCS ${SOURCES}  PRIV_REQUIRES ${PRIV_REQUIRES})
