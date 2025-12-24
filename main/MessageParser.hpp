@@ -13,15 +13,21 @@
 // limitations under the License.
 
 //
-// Created by jadjer on 05.12.2025.
+// Created by jadjer on 24.12.2025.
 //
 
 #pragma once
 
-class Usb {
-public:
-  Usb();
+#include <iebus/Message.hpp>
 
-public:
-  auto send() -> void;
+enum class Command : iebus::Bit {
+  UNKNOWN,
+  PLAY,
+  MUTE,
+  VOLUME_UP,
+  VOLUME_DOWN,
+  TRACK_NEXT,
+  TRACK_PREV,
 };
+
+auto messageParse(iebus::Message const& message) -> Command;

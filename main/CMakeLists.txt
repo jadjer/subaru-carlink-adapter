@@ -7,12 +7,12 @@ set(INCLUDES
 set(SOURCES
         main.cpp
 
-        Usb.cpp
+        USB.cpp
+        MessageParser.cpp
 )
 
 set(PRIV_REQUIRES
-        esp_iebus
-        esp_tinyusb
+        esp_driver_gpio
 )
 
-idf_component_register(INCLUDE_DIRS ${INCLUDES} SRCS ${SOURCES}  PRIV_REQUIRES ${PRIV_REQUIRES})
+idf_component_register(INCLUDE_DIRS ${INCLUDES} SRCS ${SOURCES} PRIV_REQUIRES ${PRIV_REQUIRES})

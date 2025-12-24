@@ -1,9 +1,8 @@
-## IDF Component Manager Manifest File
 dependencies:
-  idf: "^6"
-
-  espressif/esp_tinyusb: "^2"
+  idf: ^6.0.0
+  espressif/esp_tinyusb: ^2.0.1~1
 
   jadjer/esp_iebus:
     git: https://github.com/jadjer/esp-iebus.git
-    version: "*"
+#  jadjer/esp_executor:
+#    git: https://github.com/jadjer/esp-executor.git
