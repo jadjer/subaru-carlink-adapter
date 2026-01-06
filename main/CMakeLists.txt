@@ -8,11 +8,13 @@ set(SOURCES
         main.cpp
 
         USB.cpp
+        MessageQueue.cpp
         MessageParser.cpp
 )
 
 set(PRIV_REQUIRES
         esp_driver_gpio
+        esp-iebus
 )
 
 idf_component_register(INCLUDE_DIRS ${INCLUDES} SRCS ${SOURCES} PRIV_REQUIRES ${PRIV_REQUIRES})

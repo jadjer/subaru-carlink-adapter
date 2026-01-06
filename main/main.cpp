@@ -22,8 +22,11 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <iebus/Controller.hpp>
+#include <iebus/Message.hpp>
+#include <thread>
 
 #include "MessageParser.hpp"
+#include "MessageQueue.hpp"
 #include "USB.hpp"
 
 namespace {
@@ -34,28 +37,56 @@ auto constexpr IE_BUS_TX = 3;
 auto constexpr IE_BUS_ENABLE = 9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 
-} // namespace
+USB usb;
+iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
+MessageQueue<iebus::Message> messageQueue;
 
-extern "C" [[noreturn]] void app_main() {
-  USB usb;
-  iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
-
+[[noreturn]] void workerTask() {
   while (true) {
-    bool const isUsbConnected = usb.isConnected();
-
-    if (isUsbConnected != mediaController.isEnabled()) {
-      isUsbConnected ? mediaController.enable() : mediaController.disable();
-    }
-
-    if (not isUsbConnected) {
-      vTaskDelay(pdMS_TO_TICKS(100));
+    auto const optionalMessage = mediaController.readMessage();
+    if (not optionalMessage) {
       continue;
     }
 
-    if (auto const msg = mediaController.readMessage()) {
-      ESP_LOGI(TAG, "%s", msg->toString().c_str());
+    auto const message = optionalMessage.value();
 
-      switch (messageParse(*msg)) {
+    messageQueue.push(message);
+  }
+}
+
+} // namespace
+
+extern "C" [[noreturn]] void app_main() {
+  mediaController.enable();
+
+  std::thread t1(workerTask);
+  t1.detach();
+
+  while (true) {
+    //    bool const isUsbConnected = usb.isConnected();
+    //
+    //    if (isUsbConnected != mediaController.isEnabled()) {
+    //      if (isUsbConnected) {
+    //        mediaController.enable();
+    //        ESP_LOGI(TAG, "Enabled");
+    //      } else {
+    //        mediaController.disable();
+    //        ESP_LOGI(TAG, "Disabled");
+    //      }
+    //    }
+    //
+    //    if (not isUsbConnected) {
+    //      vTaskDelay(pdMS_TO_TICKS(100));
+    //      continue;
+    //    }
+
+    auto const optionalMessage = messageQueue.pop();
+    if (optionalMessage) {
+      auto const message = optionalMessage.value();
+
+      ESP_LOGI(TAG, "%s", message.toString().c_str());
+
+      switch (messageParse(message)) {
       case Command::PLAY:
         usb.play();
         break;
@@ -78,5 +109,7 @@ extern "C" [[noreturn]] void app_main() {
         break;
       }
     }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
