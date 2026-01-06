@@ -37,7 +37,6 @@ auto constexpr IE_BUS_TX = 3;
 auto constexpr IE_BUS_ENABLE = 9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 
-USB usb;
 iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
 MessageQueue<iebus::Message> messageQueue;
 
@@ -57,6 +56,8 @@ MessageQueue<iebus::Message> messageQueue;
 } // namespace
 
 extern "C" [[noreturn]] void app_main() {
+  USB usb;
+
   mediaController.enable();
 
   std::thread t1(workerTask);
