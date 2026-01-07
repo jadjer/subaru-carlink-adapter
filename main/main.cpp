@@ -46,7 +46,7 @@ void busWorker(void* pvParameters) {
 
     auto const message = optionalMessage.value();
 
-    auto const sendResult = xQueueSend(messageQueue, &message, pdMS_TO_TICKS(100));
+    auto const sendResult = xQueueSend(messageQueue, &message, pdMS_TO_TICKS(10));
     if (sendResult != pdPASS) {
       ESP_LOGE(TAG, "Queue is full");
     }
@@ -68,10 +68,10 @@ void messageProcessWorker(void* pvParameters) {
 extern "C" void app_main() {
   mediaController.enable();
 
-  messageQueue = xQueueCreate(100, sizeof(iebus::Message));
+  messageQueue = xQueueCreate(10, sizeof(iebus::Message));
 
   if (messageQueue) {
-    xTaskCreatePinnedToCore(busWorker, "bus_worker", 2048, nullptr, 5, nullptr, 0);
-    xTaskCreatePinnedToCore(messageProcessWorker, "message_process_worker", 2048, nullptr, 5, nullptr, 1);
+    xTaskCreatePinnedToCore(busWorker, "bus_worker", 2048, nullptr, 1, nullptr, 0);
+    xTaskCreatePinnedToCore(messageProcessWorker, "message_process_worker", 2048, nullptr, 1, nullptr, 1);
   }
 }
