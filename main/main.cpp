@@ -20,14 +20,10 @@
 
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 #include <freertos/task.h>
 #include <iebus/Controller.hpp>
 #include <iebus/Message.hpp>
-#include <thread>
-
-#include "MessageParser.hpp"
-#include "MessageQueue.hpp"
-#include "USB.hpp"
 
 namespace {
 
@@ -38,9 +34,10 @@ auto constexpr IE_BUS_ENABLE = 9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 
 iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
-MessageQueue<iebus::Message> messageQueue;
 
-[[noreturn]] void workerTask() {
+QueueHandle_t messageQueue;
+
+void busWorker(void* pvParameters) {
   while (true) {
     auto const optionalMessage = mediaController.readMessage();
     if (not optionalMessage) {
@@ -49,68 +46,32 @@ MessageQueue<iebus::Message> messageQueue;
 
     auto const message = optionalMessage.value();
 
-    messageQueue.push(message);
+    auto const sendResult = xQueueSend(messageQueue, &message, pdMS_TO_TICKS(100));
+    if (sendResult != pdPASS) {
+      ESP_LOGE(TAG, "Queue is full");
+    }
+  }
+}
+
+void messageProcessWorker(void* pvParameters) {
+  iebus::Message message;
+
+  while (true) {
+    if (xQueueReceive(messageQueue, &message, portMAX_DELAY)) {
+      ESP_LOGI(TAG, "%s", message.toString().c_str());
+    }
   }
 }
 
 } // namespace
 
-extern "C" [[noreturn]] void app_main() {
-  USB usb;
-
+extern "C" void app_main() {
   mediaController.enable();
 
-  std::thread t1(workerTask);
-  t1.detach();
+  messageQueue = xQueueCreate(100, sizeof(iebus::Message));
 
-  while (true) {
-    //    bool const isUsbConnected = usb.isConnected();
-    //
-    //    if (isUsbConnected != mediaController.isEnabled()) {
-    //      if (isUsbConnected) {
-    //        mediaController.enable();
-    //        ESP_LOGI(TAG, "Enabled");
-    //      } else {
-    //        mediaController.disable();
-    //        ESP_LOGI(TAG, "Disabled");
-    //      }
-    //    }
-    //
-    //    if (not isUsbConnected) {
-    //      vTaskDelay(pdMS_TO_TICKS(100));
-    //      continue;
-    //    }
-
-    auto const optionalMessage = messageQueue.pop();
-    if (optionalMessage) {
-      auto const message = optionalMessage.value();
-
-      ESP_LOGI(TAG, "%s", message.toString().c_str());
-
-      switch (messageParse(message)) {
-      case Command::PLAY:
-        usb.play();
-        break;
-      case Command::MUTE:
-        usb.mute();
-        break;
-      case Command::VOLUME_UP:
-        usb.volumeUp();
-        break;
-      case Command::VOLUME_DOWN:
-        usb.volumeDown();
-        break;
-      case Command::TRACK_NEXT:
-        usb.trackNext();
-        break;
-      case Command::TRACK_PREV:
-        usb.trackPrev();
-        break;
-      default:
-        break;
-      }
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
+  if (messageQueue) {
+    xTaskCreatePinnedToCore(busWorker, "bus_worker", 2048, nullptr, 5, nullptr, 0);
+    xTaskCreatePinnedToCore(messageProcessWorker, "message_process_worker", 2048, nullptr, 5, nullptr, 1);
   }
 }
