@@ -33,45 +33,18 @@ auto constexpr IE_BUS_TX = 3;
 auto constexpr IE_BUS_ENABLE = 9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 
-iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
-
-QueueHandle_t messageQueue;
-
-void busWorker(void* pvParameters) {
-  while (true) {
-    auto const optionalMessage = mediaController.readMessage();
-    if (not optionalMessage) {
-      continue;
-    }
-
-    auto const message = optionalMessage.value();
-
-    auto const sendResult = xQueueSend(messageQueue, &message, pdMS_TO_TICKS(10));
-    if (sendResult != pdPASS) {
-      ESP_LOGE(TAG, "Queue is full");
-    }
-  }
-}
-
-void messageProcessWorker(void* pvParameters) {
-  iebus::Message message;
-
-  while (true) {
-    if (xQueueReceive(messageQueue, &message, portMAX_DELAY)) {
-      ESP_LOGI(TAG, "%s", message.toString().c_str());
-    }
-  }
-}
-
 } // namespace
 
 extern "C" void app_main() {
+  iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
   mediaController.enable();
 
-  messageQueue = xQueueCreate(10, sizeof(iebus::Message));
-
-  if (messageQueue) {
-    xTaskCreatePinnedToCore(busWorker, "bus_worker", 2048, nullptr, 1, nullptr, 0);
-    xTaskCreatePinnedToCore(messageProcessWorker, "message_process_worker", 2048, nullptr, 1, nullptr, 1);
+  while (true) {
+    auto const message = mediaController.readMessage();
+    if (message) {
+      ESP_LOGI(TAG, "%s", message->toString().c_str());
+    } else {
+      ESP_LOGE(TAG, "%u", message.error());
+    }
   }
 }
