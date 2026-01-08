@@ -4,5 +4,3 @@ dependencies:
 
   jadjer/esp_iebus:
     git: https://github.com/jadjer/esp-iebus.git
-#  jadjer/esp_executor:
-#    git: https://github.com/jadjer/esp-executor.git
