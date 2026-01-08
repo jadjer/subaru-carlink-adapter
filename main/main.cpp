@@ -1,4 +1,4 @@
-// Copyright 2025 Pavel Suprunov
+// Copyright 2026 Pavel Suprunov
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,6 @@
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 
 #include <esp_log.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
-#include <freertos/task.h>
 #include <iebus/Controller.hpp>
 #include <iebus/Message.hpp>
 
@@ -38,10 +35,10 @@ auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 extern "C" void app_main() {
   iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
   mediaController.enable();
-//  mediaController.disable();
 
   while (mediaController.isEnabled()) {
     auto const message = mediaController.readMessage();
+
     if (message) {
       ESP_LOGI(TAG, "%s", message->toString().c_str());
     } else {
