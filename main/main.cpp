@@ -38,8 +38,9 @@ auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 extern "C" void app_main() {
   iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
   mediaController.enable();
+//  mediaController.disable();
 
-  while (true) {
+  while (mediaController.isEnabled()) {
     auto const message = mediaController.readMessage();
     if (message) {
       ESP_LOGI(TAG, "%s", message->toString().c_str());
