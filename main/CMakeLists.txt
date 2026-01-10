@@ -13,7 +13,8 @@ set(SOURCES
 )
 
 set(PRIV_REQUIRES
-
+        esp_timer
+        esp-iebus
 )
 
 idf_component_register(INCLUDE_DIRS ${INCLUDES} SRCS ${SOURCES} PRIV_REQUIRES ${PRIV_REQUIRES})

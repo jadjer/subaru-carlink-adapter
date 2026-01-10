@@ -19,7 +19,7 @@
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 
 #include <esp_log.h>
-#include <iebus/Controller.hpp>
+#include <iebus/ControllerThread.hpp>
 #include <iebus/Message.hpp>
 
 namespace {
@@ -33,16 +33,16 @@ auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 } // namespace
 
 extern "C" void app_main() {
-  iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
+  iebus::ControllerThread mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
+
   mediaController.enable();
+  mediaController.start();
 
-  while (mediaController.isEnabled()) {
-    auto const message = mediaController.readMessage();
-
-    if (message) {
-      ESP_LOGI(TAG, "%s", message->toString().c_str());
-    } else {
-      ESP_LOGE(TAG, "%u", message.error());
+  while (mediaController.isEnabled() and mediaController.isStarted()) {
+    auto const optionalMessage = mediaController.getMessage();
+    if (optionalMessage.has_value()) {
+      auto const message = optionalMessage.value();
+      ESP_LOGI(TAG, "%s", message.toString().c_str());
     }
   }
 }
