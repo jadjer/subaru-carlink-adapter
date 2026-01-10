@@ -40,6 +40,7 @@ extern "C" void app_main() {
 
   while (mediaController.isEnabled() and mediaController.isStarted()) {
     auto const optionalMessage = mediaController.getMessage();
+
     if (optionalMessage.has_value()) {
       auto const message = optionalMessage.value();
       ESP_LOGI(TAG, "%s", message.toString().c_str());
