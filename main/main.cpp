@@ -20,7 +20,6 @@
 
 #include <esp_log.h>
 #include <iebus/ControllerThread.hpp>
-#include <iebus/Message.hpp>
 
 namespace {
 
