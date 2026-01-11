@@ -27,15 +27,18 @@
 namespace {
 
 auto constexpr TAG = "CarLink";
+
 auto constexpr IE_BUS_RX = 8;
 auto constexpr IE_BUS_TX = 3;
 auto constexpr IE_BUS_ENABLE = 9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 
+auto constexpr QUEUE_MAX_SIZE = 1000;
+
 } // namespace
 
-QueueHandle_t errorQueueHandle = nullptr;
 QueueHandle_t messageQueueHandle = nullptr;
+QueueHandle_t errorMessageQueueHandle = nullptr;
 
 [[noreturn]] auto mediaWorker(void* pvParameters) -> void {
   (void)pvParameters;
@@ -43,58 +46,53 @@ QueueHandle_t messageQueueHandle = nullptr;
   iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
   mediaController.enable();
 
+  auto const isRegistered = mediaController.registerOnMaster();
+  if (not isRegistered) {
+    ESP_LOGE(TAG, "Failed to send a registration message to iebus");
+  }
+
   while (true) {
     auto const expectedMessage = mediaController.readMessage();
 
     if (expectedMessage.has_value()) {
       auto const message = expectedMessage.value();
-      xQueueSend(messageQueueHandle, &message, 1);
+      xQueueSend(messageQueueHandle, &message, 0);
 
     } else {
       auto const error = expectedMessage.error();
-      if (error >= iebus::MessageError::BROADCAST_BIT_READ_ERROR) {
-        xQueueSend(errorQueueHandle, &error, 1);
+      if (error >= iebus::MessageError::START_BIT_ARBITRATION_LOST) {
+        xQueueSend(errorMessageQueueHandle, &error, 0);
       }
     }
-
-    vTaskDelay(1);
   }
 }
 
 [[noreturn]] auto messageWorker(void* pvParameters) -> void {
-  (void)pvParameters;
-
   while (true) {
     iebus::Message message = {};
 
     if (xQueueReceive(messageQueueHandle, &message, portMAX_DELAY) == pdTRUE) {
       ESP_LOGI(TAG, "%s", message.toString().c_str());
     }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
-[[noreturn]] auto errorWorker(void* pvParameters) -> void {
-  (void)pvParameters;
-
+[[noreturn]] auto errorMessageWorker(void* pvParameters) -> void {
   while (true) {
     iebus::MessageError error = {};
 
-    if (xQueueReceive(errorQueueHandle, &error, portMAX_DELAY) == pdTRUE) {
+    if (xQueueReceive(errorMessageQueueHandle, &error, portMAX_DELAY) == pdTRUE) {
       ESP_LOGE(TAG, "%u", error);
     }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
 extern "C" void app_main() {
-  errorQueueHandle = xQueueCreate(100, sizeof(iebus::MessageError));
-  messageQueueHandle = xQueueCreate(100, sizeof(iebus::Message));
-
-  xTaskCreate(mediaWorker, "media_worker", 4096, nullptr, 5, nullptr);
-  xTaskCreate(errorWorker, "error_worker", 4096, nullptr, 6, nullptr);
+  messageQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+  errorMessageQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
 
   xTaskCreate(messageWorker, "message_worker", 4096, nullptr, 1, nullptr);
+  xTaskCreate(errorMessageWorker, "error_message_worker", 4096, nullptr, 1, nullptr);
+
+  xTaskCreatePinnedToCore(mediaWorker, "media_worker", 4096, nullptr, 10, nullptr, 1);
 }
