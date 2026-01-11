@@ -48,11 +48,10 @@ QueueHandle_t messageQueueHandle = nullptr;
 
     if (expectedMessage.has_value()) {
       auto const message = expectedMessage.value();
-
       xQueueSend(messageQueueHandle, &message, 1);
+
     } else {
       auto const error = expectedMessage.error();
-
       xQueueSend(errorQueueHandle, &error, 1);
     }
   }
@@ -74,7 +73,7 @@ QueueHandle_t messageQueueHandle = nullptr;
   (void)pvParameters;
 
   while (true) {
-    iebus::MessageReadError error;
+    iebus::MessageError error = {};
 
     if (xQueueReceive(errorQueueHandle, &error, portMAX_DELAY) == pdTRUE) {
       ESP_LOGE(TAG, "%u", error);
@@ -83,7 +82,7 @@ QueueHandle_t messageQueueHandle = nullptr;
 }
 
 extern "C" void app_main() {
-  errorQueueHandle = xQueueCreate(100, sizeof(iebus::MessageReadError));
+  errorQueueHandle = xQueueCreate(100, sizeof(iebus::MessageError));
   messageQueueHandle = xQueueCreate(100, sizeof(iebus::Message));
 
   xTaskCreate(messageWorker, "message_worker", 4096, nullptr, 1, nullptr);
