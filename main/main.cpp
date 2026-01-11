@@ -52,8 +52,12 @@ QueueHandle_t messageQueueHandle = nullptr;
 
     } else {
       auto const error = expectedMessage.error();
-      xQueueSend(errorQueueHandle, &error, 1);
+      if (error >= iebus::MessageError::BROADCAST_BIT_READ_ERROR) {
+        xQueueSend(errorQueueHandle, &error, 1);
+      }
     }
+
+    vTaskDelay(1);
   }
 }
 
@@ -66,6 +70,8 @@ QueueHandle_t messageQueueHandle = nullptr;
     if (xQueueReceive(messageQueueHandle, &message, portMAX_DELAY) == pdTRUE) {
       ESP_LOGI(TAG, "%s", message.toString().c_str());
     }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -78,6 +84,8 @@ QueueHandle_t messageQueueHandle = nullptr;
     if (xQueueReceive(errorQueueHandle, &error, portMAX_DELAY) == pdTRUE) {
       ESP_LOGE(TAG, "%u", error);
     }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -85,7 +93,8 @@ extern "C" void app_main() {
   errorQueueHandle = xQueueCreate(100, sizeof(iebus::MessageError));
   messageQueueHandle = xQueueCreate(100, sizeof(iebus::Message));
 
-  xTaskCreate(messageWorker, "message_worker", 4096, nullptr, 1, nullptr);
   xTaskCreate(mediaWorker, "media_worker", 4096, nullptr, 5, nullptr);
-  xTaskCreate(errorWorker, "error_worker", 4096, nullptr, 5, nullptr);
+  xTaskCreate(errorWorker, "error_worker", 4096, nullptr, 6, nullptr);
+
+  xTaskCreate(messageWorker, "message_worker", 4096, nullptr, 1, nullptr);
 }
