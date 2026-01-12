@@ -31,7 +31,7 @@ auto constexpr TAG = "CarLink";
 auto constexpr IE_BUS_RX = 8;
 auto constexpr IE_BUS_TX = 3;
 auto constexpr IE_BUS_ENABLE = 9;
-auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
+auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 
 auto constexpr QUEUE_MAX_SIZE = 1000;
 
@@ -45,11 +45,6 @@ QueueHandle_t errorMessageQueueHandle = nullptr;
 
   iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
   mediaController.enable();
-
-  auto const isRegistered = mediaController.registerOnMaster();
-  if (not isRegistered) {
-    ESP_LOGE(TAG, "Failed to send a registration message to iebus");
-  }
 
   while (true) {
     auto const expectedMessage = mediaController.readMessage();
