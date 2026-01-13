@@ -31,38 +31,55 @@ auto constexpr TAG = "CarLink";
 auto constexpr IE_BUS_RX = 8;
 auto constexpr IE_BUS_TX = 3;
 auto constexpr IE_BUS_ENABLE = 9;
-auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
+auto constexpr IE_BUS_DEVICE_ADDR = 0x140;
 
 auto constexpr QUEUE_MAX_SIZE = 1000;
 
 } // namespace
 
+QueueHandle_t bitQueueHandle = nullptr;
 QueueHandle_t messageQueueHandle = nullptr;
 QueueHandle_t errorMessageQueueHandle = nullptr;
 
-[[noreturn]] auto mediaWorker(void* pvParameters) -> void {
-  (void)pvParameters;
+[[noreturn]] auto mediaWorker(void*) -> void {
+  iebus::Driver mediaDriver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
+  //  iebus::Controller mediaController(mediaDriver, IE_BUS_DEVICE_ADDR);
 
-  iebus::Controller mediaController(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE, IE_BUS_DEVICE_ADDR);
-  mediaController.enable();
+  mediaDriver.enable();
 
   while (true) {
-    auto const expectedMessage = mediaController.readMessage();
+    //    auto const expectedMessage = mediaController.readMessage();
+    //
+    //    if (expectedMessage.has_value()) {
+    //      auto const message = expectedMessage.value();
+    //      xQueueSend(messageQueueHandle, &message, 0);
+    //
+    //    } else {
+    //      auto const error = expectedMessage.error();
+    //      if (error >= iebus::MessageError::START_BIT_ARBITRATION_LOST) {
+    //        xQueueSend(errorMessageQueueHandle, &error, 0);
+    //      }
+    //    }
 
-    if (expectedMessage.has_value()) {
-      auto const message = expectedMessage.value();
-      xQueueSend(messageQueueHandle, &message, 0);
+    auto const bitResult = mediaDriver.readBitResult();
+    if (bitResult.pulseWidth == 0) {
+      continue;
+    }
+    xQueueSend(bitQueueHandle, &bitResult, 0);
+  }
+}
 
-    } else {
-      auto const error = expectedMessage.error();
-      if (error >= iebus::MessageError::START_BIT_ARBITRATION_LOST) {
-        xQueueSend(errorMessageQueueHandle, &error, 0);
-      }
+[[noreturn]] auto bitWorker(void*) -> void {
+  while (true) {
+    iebus::BitResult bitResult = {};
+
+    if (xQueueReceive(bitQueueHandle, &bitResult, portMAX_DELAY) == pdTRUE) {
+      ESP_LOGI(TAG, "pw: %llu, t:%u", bitResult.pulseWidth, bitResult.bitType);
     }
   }
 }
 
-[[noreturn]] auto messageWorker(void* pvParameters) -> void {
+[[noreturn]] auto messageWorker(void*) -> void {
   while (true) {
     iebus::Message message = {};
 
@@ -72,7 +89,7 @@ QueueHandle_t errorMessageQueueHandle = nullptr;
   }
 }
 
-[[noreturn]] auto errorMessageWorker(void* pvParameters) -> void {
+[[noreturn]] auto errorMessageWorker(void*) -> void {
   while (true) {
     iebus::MessageError error = {};
 
@@ -83,9 +100,11 @@ QueueHandle_t errorMessageQueueHandle = nullptr;
 }
 
 extern "C" void app_main() {
+  bitQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::BitResult));
   messageQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
   errorMessageQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
 
+  xTaskCreate(bitWorker, "bit_worker", 4096, nullptr, 1, nullptr);
   xTaskCreate(messageWorker, "message_worker", 4096, nullptr, 1, nullptr);
   xTaskCreate(errorMessageWorker, "error_message_worker", 4096, nullptr, 1, nullptr);
 
