@@ -77,7 +77,7 @@ QueueHandle_t messageQueueHandle = nullptr;
     iebus::BitError error = {};
 
     if (xQueueReceive(errorQueueHandle, &error, portMAX_DELAY) == pdTRUE) {
-      ESP_LOGE(TAG, "pw %llu bt %u e %u", error.bitResult.pulseWidth, error.bitResult.bitType, error.errorType);
+      ESP_LOGE(TAG, "pw %lld bt %u e %u", error.bitResult.pulseWidth, error.bitResult.bitType, error.errorType);
     }
   }
 }
@@ -86,8 +86,8 @@ extern "C" void app_main() {
   errorQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::BitError));
   messageQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
 
-  xTaskCreate(errorWorker, "error_worker", 4096, nullptr, 1, nullptr);
-  xTaskCreate(messageWorker, "message_worker", 4096, nullptr, 1, nullptr);
+  xTaskCreatePinnedToCore(errorWorker, "error_worker", 4096, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(messageWorker, "message_worker", 4096, nullptr, 2, nullptr, 0);
 
   xTaskCreatePinnedToCore(mediaWorker, "media_worker", 4096, nullptr, 10, nullptr, 1);
 }
