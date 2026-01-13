@@ -33,11 +33,10 @@ auto constexpr IE_BUS_TX = 3;
 auto constexpr IE_BUS_ENABLE = 9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 
-auto constexpr QUEUE_MAX_SIZE = 1000;
+auto constexpr QUEUE_MAX_SIZE = 100;
 
 } // namespace
 
-QueueHandle_t errorQueueHandle = nullptr;
 QueueHandle_t messageQueueHandle = nullptr;
 
 [[noreturn]] auto mediaWorker(void*) -> void {
@@ -46,18 +45,13 @@ QueueHandle_t messageQueueHandle = nullptr;
 
   mediaDriver.enable();
 
+  vTaskDelay(pdMS_TO_TICKS(100));
+
   while (true) {
-    auto const expectedMessage = mediaController.readMessage();
-
-    if (expectedMessage.has_value()) {
-      auto const message = expectedMessage.value();
+    auto const optionalMessage = mediaController.readMessage();
+    if (optionalMessage.has_value()) {
+      auto const message = optionalMessage.value();
       xQueueSend(messageQueueHandle, &message, 0);
-
-    } else {
-      auto const error = expectedMessage.error();
-      if (error.bitResult.pulseWidth > 0) {
-        xQueueSend(errorQueueHandle, &error, 0);
-      }
     }
   }
 }
@@ -72,22 +66,9 @@ QueueHandle_t messageQueueHandle = nullptr;
   }
 }
 
-[[noreturn]] auto errorWorker(void*) -> void {
-  while (true) {
-    iebus::BitError error = {};
-
-    if (xQueueReceive(errorQueueHandle, &error, portMAX_DELAY) == pdTRUE) {
-      ESP_LOGE(TAG, "pw %lld bt %u e %u", error.bitResult.pulseWidth, error.bitResult.bitType, error.errorType);
-    }
-  }
-}
-
 extern "C" void app_main() {
-  errorQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::BitError));
   messageQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
 
-  xTaskCreatePinnedToCore(errorWorker, "error_worker", 4096, nullptr, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(messageWorker, "message_worker", 4096, nullptr, 2, nullptr, 0);
-
-  xTaskCreatePinnedToCore(mediaWorker, "media_worker", 4096, nullptr, 10, nullptr, 1);
+  xTaskCreatePinnedToCore(messageWorker, "message_worker", 8096, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(mediaWorker, "media_worker", 8096, nullptr, 10, nullptr, 1);
 }
