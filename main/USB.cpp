@@ -83,7 +83,7 @@ auto USB::isConnected() const -> bool {
   return tud_mounted();
 }
 
-auto USB::sendKey(std::uint16_t const key) -> bool {
+auto USB::sendKey(std::uint16_t const key) const -> bool {
   if (not isConnected()) {
     ESP_LOGW(TAG, "USB not connected to host device");
     return false;

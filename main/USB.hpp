@@ -31,7 +31,7 @@ public:
   [[nodiscard]] auto isConnected() const -> bool;
 
 public:
-  auto sendKey(std::uint16_t const key) -> bool;
+  [[nodiscard]] auto sendKey(std::uint16_t key) const -> bool;
 
 public:
   auto play() -> bool;

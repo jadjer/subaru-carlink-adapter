@@ -18,57 +18,74 @@
 
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 
-#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <iebus/Controller.hpp>
+#include <iebus/Driver.hpp>
+
+#include "MessageParser.hpp"
+#include "USB.hpp"
 
 namespace {
 
-auto constexpr TAG = "CarLink";
-
-auto constexpr IE_BUS_RX = 8;
-auto constexpr IE_BUS_TX = 3;
-auto constexpr IE_BUS_ENABLE = 9;
+auto constexpr IE_BUS_RX = GPIO_NUM_8;
+auto constexpr IE_BUS_TX = GPIO_NUM_3;
+auto constexpr IE_BUS_ENABLE = GPIO_NUM_9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 
 auto constexpr QUEUE_MAX_SIZE = 100;
 
+struct MediaContext {
+  USB& usb;
+  iebus::Driver& driver;
+  iebus::Controller& controller;
+  QueueHandle_t queue;
+};
+
+USB usb;
+iebus::Driver driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
+iebus::Controller controller(driver, IE_BUS_DEVICE_ADDR);
+QueueHandle_t queue = nullptr;
+
 } // namespace
 
-QueueHandle_t messageQueueHandle = nullptr;
+[[noreturn]] auto mediaWorker(void* pvParameters) -> void {
+  auto const context = static_cast<MediaContext*>(pvParameters);
 
-[[noreturn]] auto mediaWorker(void*) -> void {
-  iebus::Driver mediaDriver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
-  iebus::Controller mediaController(mediaDriver, IE_BUS_DEVICE_ADDR);
-
-  mediaDriver.enable();
-
-  vTaskDelay(pdMS_TO_TICKS(100));
+  context->driver.enable();
 
   while (true) {
-    auto const optionalMessage = mediaController.readMessage();
+    auto const optionalMessage = context->controller.readMessage();
     if (optionalMessage.has_value()) {
       auto const message = optionalMessage.value();
-      xQueueSend(messageQueueHandle, &message, 0);
+      xQueueSend(context->queue, &message, 0);
     }
   }
 }
 
-[[noreturn]] auto messageWorker(void*) -> void {
-  while (true) {
-    iebus::Message message = {};
+[[noreturn]] auto messageWorker(void* pvParameters) -> void {
+  auto const context = static_cast<MediaContext*>(pvParameters);
 
-    if (xQueueReceive(messageQueueHandle, &message, portMAX_DELAY) == pdTRUE) {
-      ESP_LOGI(TAG, "%s", message.toString().c_str());
+  iebus::Message message = {};
+
+  while (true) {
+    if (xQueueReceive(context->queue, &message, portMAX_DELAY) == pdTRUE) {
+      iebus::printMessage(message);
+
+//      messageParse(message);
     }
   }
 }
 
 extern "C" void app_main() {
-  messageQueueHandle = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+  queue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+  if (queue == nullptr) {
+    return;
+  }
 
-  xTaskCreatePinnedToCore(messageWorker, "message_worker", 8096, nullptr, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(mediaWorker, "media_worker", 8096, nullptr, 10, nullptr, 1);
+  static MediaContext context{usb, driver, controller, queue};
+
+  xTaskCreatePinnedToCore(messageWorker, "message_worker", 8096, &context, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(mediaWorker, "media_worker", 8096, &context, 10, nullptr, 1);
 }

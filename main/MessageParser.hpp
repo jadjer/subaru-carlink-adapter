@@ -28,6 +28,8 @@ enum class Command : iebus::Bit {
   VOLUME_DOWN,
   TRACK_NEXT,
   TRACK_PREV,
+
+  BUS_REGISTER_REQUEST,
 };
 
 auto messageParse(iebus::Message const& message) -> Command;

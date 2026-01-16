@@ -8,7 +8,6 @@ set(SOURCES
         main.cpp
 
         USB.cpp
-        MessageQueue.cpp
         MessageParser.cpp
 )
 
