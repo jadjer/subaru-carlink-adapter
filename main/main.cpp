@@ -18,16 +18,19 @@
 
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <iebus/Controller.hpp>
 #include <iebus/Driver.hpp>
+#include <iebus/Processor.hpp>
 
 #include "MessageParser.hpp"
-#include "USB.hpp"
 
 namespace {
+
+auto constexpr TAG = "Carlink";
 
 auto constexpr IE_BUS_RX = GPIO_NUM_8;
 auto constexpr IE_BUS_TX = GPIO_NUM_3;
@@ -37,20 +40,22 @@ auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 auto constexpr QUEUE_MAX_SIZE = 100;
 
 struct MediaContext {
-  USB& usb;
   iebus::Driver& driver;
   iebus::Controller& controller;
-  QueueHandle_t queue;
+  iebus::Processor& processor;
+  QueueHandle_t readQueue;
+  QueueHandle_t writeQueue;
 };
 
-USB usb;
 iebus::Driver driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
 iebus::Controller controller(driver, IE_BUS_DEVICE_ADDR);
-QueueHandle_t queue = nullptr;
+iebus::Processor processor(IE_BUS_DEVICE_ADDR);
+QueueHandle_t readQueue = nullptr;
+QueueHandle_t writeQueue = nullptr;
 
 } // namespace
 
-[[noreturn]] auto mediaWorker(void* pvParameters) -> void {
+[[noreturn]] auto mediaReader(void* pvParameters) -> void {
   auto const context = static_cast<MediaContext*>(pvParameters);
 
   context->driver.enable();
@@ -59,7 +64,22 @@ QueueHandle_t queue = nullptr;
     auto const optionalMessage = context->controller.readMessage();
     if (optionalMessage.has_value()) {
       auto const message = optionalMessage.value();
-      xQueueSend(context->queue, &message, 0);
+      xQueueSend(context->readQueue, &message, 0);
+    }
+  }
+}
+
+[[noreturn]] auto mediaWriter(void* pvParameters) -> void {
+  auto const context = static_cast<MediaContext*>(pvParameters);
+
+  iebus::Message message = {};
+
+  while (true) {
+    if (xQueueReceive(context->writeQueue, &message, portMAX_DELAY) == pdTRUE) {
+      auto const isWritten = context->controller.writeMessage(message);
+      if (not isWritten) {
+        ESP_LOGE(TAG, "Couldn't write a message to the bus");
+      }
     }
   }
 }
@@ -67,25 +87,25 @@ QueueHandle_t queue = nullptr;
 [[noreturn]] auto messageWorker(void* pvParameters) -> void {
   auto const context = static_cast<MediaContext*>(pvParameters);
 
-  iebus::Message message = {};
+  iebus::Message requestMessage = {};
 
   while (true) {
-    if (xQueueReceive(context->queue, &message, portMAX_DELAY) == pdTRUE) {
-      iebus::printMessage(message);
-
-//      messageParse(message);
+    if (xQueueReceive(context->readQueue, &requestMessage, portMAX_DELAY) == pdTRUE) {
+      iebus::printMessage(requestMessage);
+      auto const responseMessage = context->processor.processMessage(requestMessage);
+      xQueueSend(context->writeQueue, &responseMessage, 0);
     }
   }
 }
 
 extern "C" void app_main() {
-  queue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
-  if (queue == nullptr) {
-    return;
-  }
+  readQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+  writeQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
 
-  static MediaContext context{usb, driver, controller, queue};
+  static MediaContext context{driver, controller, processor, readQueue, writeQueue};
 
-  xTaskCreatePinnedToCore(messageWorker, "message_worker", 8096, &context, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(mediaWorker, "media_worker", 8096, &context, 10, nullptr, 1);
+  xTaskCreatePinnedToCore(mediaReader, "media_reader", 4096, &context, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(mediaWriter, "media_writer", 4096, &context, 1, nullptr, 0);
+
+  xTaskCreatePinnedToCore(messageWorker, "message_worker", 4096, &context, 1, nullptr, 0);
 }
