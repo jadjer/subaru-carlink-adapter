@@ -45,6 +45,7 @@ struct MediaContext {
   iebus::Processor& processor;
   QueueHandle_t readQueue;
   QueueHandle_t writeQueue;
+  QueueHandle_t errorQueue;
 };
 
 iebus::Driver driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
@@ -52,6 +53,7 @@ iebus::Controller controller(driver, IE_BUS_DEVICE_ADDR);
 iebus::Processor processor(IE_BUS_DEVICE_ADDR);
 QueueHandle_t readQueue = nullptr;
 QueueHandle_t writeQueue = nullptr;
+QueueHandle_t errorQueue = nullptr;
 
 } // namespace
 
@@ -61,10 +63,13 @@ QueueHandle_t writeQueue = nullptr;
   context->driver.enable();
 
   while (true) {
-    auto const optionalMessage = context->controller.readMessage();
-    if (optionalMessage.has_value()) {
-      auto const message = optionalMessage.value();
+    auto const expectedMessage = context->controller.readMessage();
+    if (expectedMessage.has_value()) {
+      auto const message = expectedMessage.value();
       xQueueSend(context->readQueue, &message, 0);
+    } else {
+      auto const error = expectedMessage.error();
+      xQueueSend(context->errorQueue, &error, 0);
     }
   }
 }
@@ -84,16 +89,33 @@ QueueHandle_t writeQueue = nullptr;
   }
 }
 
-[[noreturn]] auto messageWorker(void* pvParameters) -> void {
+[[noreturn]] auto messageProcess(void* pvParameters) -> void {
   auto const context = static_cast<MediaContext*>(pvParameters);
 
-  iebus::Message requestMessage = {};
+  iebus::Message message = {};
 
   while (true) {
-    if (xQueueReceive(context->readQueue, &requestMessage, portMAX_DELAY) == pdTRUE) {
-      iebus::printMessage(requestMessage);
-      auto const responseMessage = context->processor.processMessage(requestMessage);
-      xQueueSend(context->writeQueue, &responseMessage, 0);
+    if (xQueueReceive(context->readQueue, &message, portMAX_DELAY) == pdTRUE) {
+
+      iebus::printMessage(message);
+
+      auto const optionalResponseMessage = context->processor.processMessage(message);
+      if (optionalResponseMessage.has_value()) {
+        auto const responseMessage = optionalResponseMessage.value();
+        xQueueSend(context->writeQueue, &responseMessage, 0);
+      }
+    }
+  }
+}
+
+[[noreturn]] auto messageError(void* pvParameters) -> void {
+  auto const context = static_cast<MediaContext*>(pvParameters);
+
+  iebus::MessageError errorMessage = {};
+
+  while (true) {
+    if (xQueueReceive(context->errorQueue, &errorMessage, portMAX_DELAY) == pdTRUE) {
+      printf("%u\n", static_cast<iebus::Bit>(errorMessage));
     }
   }
 }
@@ -101,11 +123,13 @@ QueueHandle_t writeQueue = nullptr;
 extern "C" void app_main() {
   readQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
   writeQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+  errorQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
 
-  static MediaContext context{driver, controller, processor, readQueue, writeQueue};
+  static MediaContext context{driver, controller, processor, readQueue, writeQueue, errorQueue};
 
-  xTaskCreatePinnedToCore(mediaReader, "media_reader", 4096, &context, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(mediaWriter, "media_writer", 4096, &context, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(messageError, "message_error", 4096, &context, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(messageProcess, "message_process", 4096, &context, 2, nullptr, 0);
 
-  xTaskCreatePinnedToCore(messageWorker, "message_worker", 4096, &context, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(mediaReader, "media_reader", 4096, &context, 2, nullptr, 1);
+  xTaskCreatePinnedToCore(mediaWriter, "media_writer", 4096, &context, 1, nullptr, 1);
 }
