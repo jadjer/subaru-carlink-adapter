@@ -25,6 +25,7 @@
 #include <iebus/Controller.hpp>
 #include <iebus/Driver.hpp>
 #include <iebus/Processor.hpp>
+#include <iebus/common.hpp>
 
 #include "MessageParser.hpp"
 
@@ -96,7 +97,6 @@ QueueHandle_t errorQueue = nullptr;
 
   while (true) {
     if (xQueueReceive(context->readQueue, &message, portMAX_DELAY) == pdTRUE) {
-
       iebus::printMessage(message);
 
       auto const optionalResponseMessage = context->processor.processMessage(message);
@@ -115,7 +115,7 @@ QueueHandle_t errorQueue = nullptr;
 
   while (true) {
     if (xQueueReceive(context->errorQueue, &errorMessage, portMAX_DELAY) == pdTRUE) {
-      printf("%u\n", static_cast<iebus::Bit>(errorMessage));
+      iebus::printMessageError(errorMessage);
     }
   }
 }
