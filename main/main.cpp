@@ -41,95 +41,92 @@ auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 auto constexpr QUEUE_MAX_SIZE = 100;
 
 struct MediaContext {
-  iebus::Driver& driver;
-  iebus::Controller& controller;
-  iebus::Processor& processor;
-  QueueHandle_t readQueue;
-  QueueHandle_t writeQueue;
-  QueueHandle_t errorQueue;
+  iebus::Driver driver{IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE};
+  iebus::Controller controller{driver, IE_BUS_DEVICE_ADDR};
+  iebus::Processor processor{IE_BUS_DEVICE_ADDR};
+
+  QueueHandle_t errorQueue = nullptr;
+  QueueHandle_t messageQueue = nullptr;
+
+  bool init() {
+    errorQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
+    messageQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+
+    return (errorQueue and messageQueue);
+  }
 };
 
-iebus::Driver driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
-iebus::Controller controller(driver, IE_BUS_DEVICE_ADDR);
-iebus::Processor processor(IE_BUS_DEVICE_ADDR);
-QueueHandle_t readQueue = nullptr;
-QueueHandle_t writeQueue = nullptr;
-QueueHandle_t errorQueue = nullptr;
+MediaContext ctx;
 
 } // namespace
 
-[[noreturn]] auto mediaReader(void* pvParameters) -> void {
-  auto const context = static_cast<MediaContext*>(pvParameters);
+[[noreturn]] auto busWorker(void* pvParameters) -> void {
+  auto& context = *static_cast<MediaContext*>(pvParameters);
 
-  context->driver.enable();
+  context.driver.enable();
 
   while (true) {
-    auto const expectedMessage = context->controller.readMessage();
-    if (expectedMessage.has_value()) {
-      auto const message = expectedMessage.value();
-      xQueueSend(context->readQueue, &message, 0);
+    auto const result = context.controller.readMessage();
+    if (result) {
+      auto const value = result.value();
+      if (xQueueSend(context.messageQueue, &value, 0) != pdPASS) {
+        ESP_LOGW(TAG, "Message queue is full");
+      }
+
+      auto const messages = context.processor.processMessage(value);
+      for (auto const& message : messages) {
+        if (xQueueSend(context.messageQueue, &message, 0) != pdPASS) {
+          ESP_LOGW(TAG, "Message queue is full");
+        }
+
+        auto const isWritten = context.controller.writeMessage(message);
+        if (not isWritten) {
+          ESP_LOGE(TAG, "Couldn't write a message to the bus");
+        }
+      }
     } else {
-      auto const error = expectedMessage.error();
-      xQueueSend(context->errorQueue, &error, 0);
-    }
-  }
-}
-
-[[noreturn]] auto mediaWriter(void* pvParameters) -> void {
-  auto const context = static_cast<MediaContext*>(pvParameters);
-
-  iebus::Message message = {};
-
-  while (true) {
-    if (xQueueReceive(context->writeQueue, &message, portMAX_DELAY) == pdTRUE) {
-      auto const isWritten = context->controller.writeMessage(message);
-      if (not isWritten) {
-        ESP_LOGE(TAG, "Couldn't write a message to the bus");
+      auto const error = result.error();
+      if (error >= iebus::MessageError::BROADCAST_BIT_READ_ERROR) {
+        if (xQueueSend(context.errorQueue, &error, 0) != pdPASS) {
+          ESP_LOGW(TAG, "Error queue is full");
+        }
       }
     }
   }
 }
 
-[[noreturn]] auto messageProcess(void* pvParameters) -> void {
-  auto const context = static_cast<MediaContext*>(pvParameters);
+[[noreturn]] auto messagePrint(void* pvParameters) -> void {
+  auto& context = *static_cast<MediaContext*>(pvParameters);
 
   iebus::Message message = {};
 
   while (true) {
-    if (xQueueReceive(context->readQueue, &message, portMAX_DELAY) == pdTRUE) {
+    if (xQueueReceive(context.messageQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::printMessage(message);
-
-      auto const optionalResponseMessage = context->processor.processMessage(message);
-      if (optionalResponseMessage.has_value()) {
-        auto const responseMessage = optionalResponseMessage.value();
-        xQueueSend(context->writeQueue, &responseMessage, 0);
-      }
     }
   }
 }
 
 [[noreturn]] auto messageError(void* pvParameters) -> void {
-  auto const context = static_cast<MediaContext*>(pvParameters);
+  auto& context = *static_cast<MediaContext*>(pvParameters);
 
   iebus::MessageError errorMessage = {};
 
   while (true) {
-    if (xQueueReceive(context->errorQueue, &errorMessage, portMAX_DELAY) == pdTRUE) {
+    if (xQueueReceive(context.errorQueue, &errorMessage, portMAX_DELAY) == pdTRUE) {
       iebus::printMessageError(errorMessage);
     }
   }
 }
 
 extern "C" void app_main() {
-  readQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
-  writeQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
-  errorQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
+  if (not ctx.init()) {
+    ESP_LOGE(TAG, "Failed to create queues");
+    return;
+  }
 
-  static MediaContext context{driver, controller, processor, readQueue, writeQueue, errorQueue};
+  xTaskCreatePinnedToCore(messagePrint, "message_print", 4096, &ctx, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(messageError, "message_error", 4096, &ctx, 1, nullptr, 0);
 
-  xTaskCreatePinnedToCore(messageError, "message_error", 4096, &context, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(messageProcess, "message_process", 4096, &context, 2, nullptr, 0);
-
-  xTaskCreatePinnedToCore(mediaReader, "media_reader", 4096, &context, 2, nullptr, 1);
-  xTaskCreatePinnedToCore(mediaWriter, "media_writer", 4096, &context, 1, nullptr, 1);
+  xTaskCreatePinnedToCore(busWorker, "bus_worker", 4096, &ctx, 10, nullptr, 1);
 }
