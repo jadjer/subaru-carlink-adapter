@@ -17,6 +17,7 @@
 //
 
 #include <esp_log.h>
+#include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -32,15 +33,15 @@ namespace {
 
 auto constexpr TAG = "Carlink";
 
-auto constexpr IE_BUS_RX = GPIO_NUM_8;
-auto constexpr IE_BUS_TX = GPIO_NUM_3;
-auto constexpr IE_BUS_ENABLE = GPIO_NUM_9;
+auto constexpr IE_BUS_RX          = GPIO_NUM_8;
+auto constexpr IE_BUS_TX          = GPIO_NUM_3;
+auto constexpr IE_BUS_ENABLE      = GPIO_NUM_9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 
 auto constexpr QUEUE_MAX_SIZE = 100;
 
 struct Context {
-  QueueHandle_t errorQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
+  QueueHandle_t errorQueue   = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
   QueueHandle_t messageQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
 };
 
@@ -102,14 +103,14 @@ auto busWorker(void* pvParameters) -> void {
 [[noreturn]] auto messageProcess(void* pvParameters) -> void {
   auto& context = *static_cast<Context*>(pvParameters);
 
-  USB usb;
+  //  USB usb;
   iebus::Message message = {};
 
   while (true) {
     if (xQueueReceive(context.messageQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::printMessage(message);
 
-      usb.write({0x00, 0x12, 0x32, 0x44});
+      //      usb.write({0x00, 0x12, 0x32, 0x44});
 
       //      auto const action = parseMessageToUsbAction(message);
       //      switch (action) {
