@@ -6,7 +6,7 @@ idf_build_set_property(MINIMAL_BUILD ON)
 idf_build_set_property(IDF_TARGET esp32s3)
 
 project(SubaruCarlinkAdapter
-        VERSION 0.0.1
+        VERSION 0.0.4
         DESCRIPTION "Subaru Carlink Adapter"
         HOMEPAGE_URL https://github.com/jadjer/subaru-carlink-adapter
         LANGUAGES CXX

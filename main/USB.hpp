@@ -19,10 +19,15 @@
 #pragma once
 
 #include <cstdint>
+#include <tinyusb_cdc_acm.h>
+#include <vector>
 
 class USB {
-private:
-  using Port = uint8_t;
+public:
+  using Bit  = std::uint8_t;
+  using Size = std::size_t;
+  using Bits = std::vector<Bit>;
+  using Port = tinyusb_cdcacm_itf_t;
 
 public:
   USB();
@@ -31,17 +36,9 @@ public:
   [[nodiscard]] auto isConnected() const -> bool;
 
 public:
-  [[nodiscard]] auto sendKey(std::uint16_t key) const -> bool;
+  auto read() -> void;
+  auto write(Bits bits) -> void;
 
-public:
-  auto play() -> bool;
-
-public:
-  auto mute() -> bool;
-  auto volumeUp() -> bool;
-  auto volumeDown() -> bool;
-
-public:
-  auto trackNext() -> bool;
-  auto trackPrev() -> bool;
+private:
+  Port const m_port;
 };

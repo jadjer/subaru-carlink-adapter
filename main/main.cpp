@@ -16,8 +16,6 @@
 // Created by jadjer on 30.11.2025.
 //
 
-#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
-
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -42,22 +40,15 @@ auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 auto constexpr QUEUE_MAX_SIZE = 100;
 
 struct Context {
-  QueueHandle_t errorQueue = nullptr;
-  QueueHandle_t messageQueue = nullptr;
-
-  bool init() {
-    errorQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
-    messageQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
-
-    return (errorQueue and messageQueue);
-  }
+  QueueHandle_t errorQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
+  QueueHandle_t messageQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
 };
 
 Context ctx;
 
 } // namespace
 
-[[noreturn]] auto busWorker(void* pvParameters) -> void {
+auto busWorker(void* pvParameters) -> void {
   auto& context = *static_cast<Context*>(pvParameters);
 
   iebus::Driver driver{IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE};
@@ -66,7 +57,7 @@ Context ctx;
 
   driver.enable();
 
-  while (true) {
+  while (driver.isEnabled()) {
     auto const result = controller.readMessage();
     if (result) {
       auto const value = result.value();
@@ -118,30 +109,27 @@ Context ctx;
     if (xQueueReceive(context.messageQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::printMessage(message);
 
-//      auto const action = parseMessageToUsbAction(message);
-//      switch (action) {
-//      case USB_ACTION_TRACK_PREV:
-//        usb.trackPrev();
-//        break;
-//      case USB_ACTION_TRACK_NEXT:
-//        usb.trackNext();
-//        break;
-//      case USB_ACTION_PLAY:
-//        usb.play();
-//        break;
-//      case USB_ACTION_MUTE:
-//        usb.mute();
-//      }
+      usb.write({0x00, 0x12, 0x32, 0x44});
+
+      //      auto const action = parseMessageToUsbAction(message);
+      //      switch (action) {
+      //      case USB_ACTION_TRACK_PREV:
+      //        usb.trackPrev();
+      //        break;
+      //      case USB_ACTION_TRACK_NEXT:
+      //        usb.trackNext();
+      //        break;
+      //      case USB_ACTION_PLAY:
+      //        usb.play();
+      //        break;
+      //      case USB_ACTION_MUTE:
+      //        usb.mute();
+      //      }
     }
   }
 }
 
 extern "C" void app_main() {
-  if (not ctx.init()) {
-    ESP_LOGE(TAG, "Failed to create queues");
-    return;
-  }
-
   xTaskCreatePinnedToCore(messageError, "message_error", 4096, &ctx, 1, nullptr, 0);
   xTaskCreatePinnedToCore(messageProcess, "message_process", 4096, &ctx, 1, nullptr, 0);
 
