@@ -28,6 +28,7 @@
 #include <iebus/common.hpp>
 
 #include "MessageParser.hpp"
+#include "USB.hpp"
 
 namespace {
 
@@ -40,11 +41,7 @@ auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 
 auto constexpr QUEUE_MAX_SIZE = 100;
 
-struct MediaContext {
-  iebus::Driver driver{IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE};
-  iebus::Controller controller{driver, IE_BUS_DEVICE_ADDR};
-  iebus::Processor processor{IE_BUS_DEVICE_ADDR};
-
+struct Context {
   QueueHandle_t errorQueue = nullptr;
   QueueHandle_t messageQueue = nullptr;
 
@@ -56,30 +53,34 @@ struct MediaContext {
   }
 };
 
-MediaContext ctx;
+Context ctx;
 
 } // namespace
 
 [[noreturn]] auto busWorker(void* pvParameters) -> void {
-  auto& context = *static_cast<MediaContext*>(pvParameters);
+  auto& context = *static_cast<Context*>(pvParameters);
 
-  context.driver.enable();
+  iebus::Driver driver{IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE};
+  iebus::Controller controller{driver, IE_BUS_DEVICE_ADDR};
+  iebus::Processor processor{IE_BUS_DEVICE_ADDR};
+
+  driver.enable();
 
   while (true) {
-    auto const result = context.controller.readMessage();
+    auto const result = controller.readMessage();
     if (result) {
       auto const value = result.value();
       if (xQueueSend(context.messageQueue, &value, 0) != pdPASS) {
         ESP_LOGW(TAG, "Message queue is full");
       }
 
-      auto const messages = context.processor.processMessage(value);
+      auto const messages = processor.processMessage(value);
       for (auto const& message : messages) {
         if (xQueueSend(context.messageQueue, &message, 0) != pdPASS) {
           ESP_LOGW(TAG, "Message queue is full");
         }
 
-        auto const isWritten = context.controller.writeMessage(message);
+        auto const isWritten = controller.writeMessage(message);
         if (not isWritten) {
           ESP_LOGE(TAG, "Couldn't write a message to the bus");
         }
@@ -95,26 +96,42 @@ MediaContext ctx;
   }
 }
 
-[[noreturn]] auto messagePrint(void* pvParameters) -> void {
-  auto& context = *static_cast<MediaContext*>(pvParameters);
+[[noreturn]] auto messageError(void* pvParameters) -> void {
+  auto& context = *static_cast<Context*>(pvParameters);
 
+  iebus::MessageError messageError = {};
+
+  while (true) {
+    if (xQueueReceive(context.errorQueue, &messageError, portMAX_DELAY) == pdTRUE) {
+      iebus::printMessageError(messageError);
+    }
+  }
+}
+
+[[noreturn]] auto messageProcess(void* pvParameters) -> void {
+  auto& context = *static_cast<Context*>(pvParameters);
+
+  USB usb;
   iebus::Message message = {};
 
   while (true) {
     if (xQueueReceive(context.messageQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::printMessage(message);
-    }
-  }
-}
 
-[[noreturn]] auto messageError(void* pvParameters) -> void {
-  auto& context = *static_cast<MediaContext*>(pvParameters);
-
-  iebus::MessageError errorMessage = {};
-
-  while (true) {
-    if (xQueueReceive(context.errorQueue, &errorMessage, portMAX_DELAY) == pdTRUE) {
-      iebus::printMessageError(errorMessage);
+//      auto const action = parseMessageToUsbAction(message);
+//      switch (action) {
+//      case USB_ACTION_TRACK_PREV:
+//        usb.trackPrev();
+//        break;
+//      case USB_ACTION_TRACK_NEXT:
+//        usb.trackNext();
+//        break;
+//      case USB_ACTION_PLAY:
+//        usb.play();
+//        break;
+//      case USB_ACTION_MUTE:
+//        usb.mute();
+//      }
     }
   }
 }
@@ -125,8 +142,8 @@ extern "C" void app_main() {
     return;
   }
 
-  xTaskCreatePinnedToCore(messagePrint, "message_print", 4096, &ctx, 1, nullptr, 0);
   xTaskCreatePinnedToCore(messageError, "message_error", 4096, &ctx, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(messageProcess, "message_process", 4096, &ctx, 1, nullptr, 0);
 
   xTaskCreatePinnedToCore(busWorker, "bus_worker", 4096, &ctx, 10, nullptr, 1);
 }
