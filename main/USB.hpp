@@ -36,8 +36,8 @@ public:
   [[nodiscard]] auto isConnected() const noexcept -> bool;
 
 public:
-  auto read() noexcept -> void;
-  auto write(Bits bits) noexcept -> void;
+  auto read() const noexcept -> void;
+  auto write(Bits bits) const noexcept -> void;
 
 private:
   Port m_port = 0;

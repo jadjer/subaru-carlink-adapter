@@ -37,7 +37,7 @@ auto constexpr IE_BUS_TX          = GPIO_NUM_3;
 auto constexpr IE_BUS_ENABLE      = GPIO_NUM_9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 
-auto constexpr QUEUE_MAX_SIZE = 500;
+auto constexpr QUEUE_MAX_SIZE = 100;
 
 struct Context {
   QueueHandle_t errorQueue;
@@ -94,6 +94,7 @@ Context* ctx = nullptr;
 
       if (writeResult.has_value()) {
         xQueueSend(context.messageQueue, &message, 0);
+
       } else {
         xQueueSendToFront(context.writeQueue, &message, 0);
 
@@ -121,14 +122,14 @@ Context* ctx = nullptr;
 [[noreturn]] auto messageProcessWorker(void* pvParameters) -> void {
   auto const& context = *static_cast<Context*>(pvParameters);
 
-  //  USB usb;
+//  USB usb                = {0};
   iebus::Message message = {};
 
   while (true) {
     if (xQueueReceive(context.messageQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::common::printMessage(message);
 
-      //      usb.write({0x00, 0x12, 0x32, 0x44});
+//      usb.write({0x00, 0x12, 0x32, 0x44});
 
       //      auto const action = parseMessageToUsbAction(message);
       //      switch (action) {

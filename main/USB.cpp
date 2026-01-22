@@ -73,7 +73,7 @@ auto USB::isConnected() const noexcept -> bool {
   return tud_mounted();
 }
 
-auto USB::read() noexcept -> void {
+auto USB::read() const noexcept -> void {
   Bits buffer;
   buffer.reserve(100);
 
@@ -84,7 +84,11 @@ auto USB::read() noexcept -> void {
   ESP_LOGI(TAG, "Read %d bits", dataSize);
 }
 
-auto USB::write(Bits bits) noexcept -> void {
+auto USB::write(Bits bits) const noexcept -> void {
+  if (not tud_cdc_connected()) {
+    return;
+  }
+
   auto const writtenBits = tinyusb_cdcacm_write_queue(static_cast<tinyusb_cdcacm_itf_t>(m_port), bits.data(), bits.size());
   if (writtenBits != bits.size()) {
     ESP_LOGE(TAG, "Not all the bits were written");
