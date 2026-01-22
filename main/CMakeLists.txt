@@ -13,8 +13,7 @@ set(SOURCES
 )
 
 set(PRIV_REQUIRES
-        esp_timer
-        esp-iebus
+        esp_iebus
         esp_driver_twai
 )
 
