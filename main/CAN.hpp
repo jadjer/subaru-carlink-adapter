@@ -13,32 +13,27 @@
 // limitations under the License.
 
 //
-// Created by jadjer on 18.12.2025.
+// Created by jadjer on 22.01.2026.
 //
 
 #pragma once
 
 #include <cstdint>
-#include <vector>
+#include <esp_twai_types.h>
 
-class USB {
+class CAN {
 public:
-  using Bit  = std::uint8_t;
-  using Port = std::uint8_t;
-  using Size = std::size_t;
-  using Bits = std::vector<Bit>;
+  using Pin = std::uint8_t;
+  using Node = twai_node_handle_t;
 
 public:
-  USB(Port port) noexcept;
-  ~USB() noexcept;
-
-public:
-  [[nodiscard]] auto isConnected() const noexcept -> bool;
-
-public:
-  auto read() noexcept -> void;
-  auto write(Bits bits) noexcept -> void;
+  CAN(Pin rx, Pin tx) noexcept;
+  ~CAN() noexcept;
 
 private:
-  Port m_port = 0;
+  Pin const m_rxPin;
+  Pin const m_txPin;
+
+private:
+  Node m_node = nullptr;
 };

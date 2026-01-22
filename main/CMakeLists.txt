@@ -7,6 +7,7 @@ set(INCLUDES
 set(SOURCES
         main.cpp
 
+        CAN.cpp
         USB.cpp
         MessageParser.cpp
 )
@@ -14,6 +15,7 @@ set(SOURCES
 set(PRIV_REQUIRES
         esp_timer
         esp-iebus
+        esp_driver_twai
 )
 
 idf_component_register(INCLUDE_DIRS ${INCLUDES} SRCS ${SOURCES} PRIV_REQUIRES ${PRIV_REQUIRES})

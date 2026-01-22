@@ -22,8 +22,7 @@
 #include <esp_log.h>
 #include <string_view>
 #include <tinyusb.h>
-
-#include <tinyusb_default_config.h>
+#include <tinyusb_cdc_acm.h>
 
 namespace {
 
@@ -39,16 +38,24 @@ auto HID_STRING_DESCRIPTION = std::to_array<char const*>({
 
 } // namespace
 
-USB::USB() : m_port(TINYUSB_CDC_ACM_0) {
-  auto usbConfiguration                         = TINYUSB_DEFAULT_CONFIG();
-  usbConfiguration.descriptor.device            = nullptr;
-  usbConfiguration.descriptor.string            = HID_STRING_DESCRIPTION.data();
-  usbConfiguration.descriptor.string_count      = HID_STRING_DESCRIPTION.size();
-  usbConfiguration.descriptor.full_speed_config = nullptr;
+USB::USB(Port port) noexcept : m_port(port) {
+  tinyusb_config_t const usbConfiguration = {
+      .port       = TINYUSB_PORT_FULL_SPEED_0,
+      .phy        = {.skip_setup = false, .self_powered = false, .vbus_monitor_io = 0},
+      .task       = {.size = 4096, .priority = 10, .xCoreID = 0},
+      .descriptor = {.device            = nullptr,
+                     .qualifier         = nullptr,
+                     .string            = HID_STRING_DESCRIPTION.data(),
+                     .string_count      = HID_STRING_DESCRIPTION.size(),
+                     .full_speed_config = nullptr,
+                     .high_speed_config = nullptr},
+      .event_cb   = nullptr,
+      .event_arg  = this
+  };
   ESP_ERROR_CHECK(tinyusb_driver_install(&usbConfiguration));
 
   tinyusb_config_cdcacm_t const acmConfiguration = {
-      .cdc_port                     = m_port,
+      .cdc_port                     = static_cast<tinyusb_cdcacm_itf_t>(m_port),
       .callback_rx                  = nullptr,
       .callback_rx_wanted_char      = nullptr,
       .callback_line_state_changed  = nullptr,
@@ -57,25 +64,30 @@ USB::USB() : m_port(TINYUSB_CDC_ACM_0) {
   ESP_ERROR_CHECK(tinyusb_cdcacm_init(&acmConfiguration));
 }
 
-auto USB::isConnected() const -> bool {
+USB::~USB() noexcept {
+  ESP_ERROR_CHECK(tinyusb_cdcacm_deinit(TINYUSB_CDC_ACM_0));
+  ESP_ERROR_CHECK(tinyusb_driver_uninstall());
+}
+
+auto USB::isConnected() const noexcept -> bool {
   return tud_mounted();
 }
 
-auto USB::read() -> void {
+auto USB::read() noexcept -> void {
   Bits buffer;
   buffer.reserve(100);
 
   Size dataSize = 0;
 
-  tinyusb_cdcacm_read(m_port, buffer.data(), buffer.size(), &dataSize);
+  tinyusb_cdcacm_read(static_cast<tinyusb_cdcacm_itf_t>(m_port), buffer.data(), buffer.size(), &dataSize);
 
   ESP_LOGI(TAG, "Read %d bits", dataSize);
 }
 
-auto USB::write(Bits bits) -> void {
-  auto const writtenBits = tinyusb_cdcacm_write_queue(m_port, bits.data(), bits.size());
+auto USB::write(Bits bits) noexcept -> void {
+  auto const writtenBits = tinyusb_cdcacm_write_queue(static_cast<tinyusb_cdcacm_itf_t>(m_port), bits.data(), bits.size());
   if (writtenBits != bits.size()) {
     ESP_LOGE(TAG, "Not all the bits were written");
   }
-  tinyusb_cdcacm_write_flush(m_port, 0);
+  tinyusb_cdcacm_write_flush(static_cast<tinyusb_cdcacm_itf_t>(m_port), 0);
 }

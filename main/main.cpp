@@ -17,7 +17,6 @@
 //
 
 #include <esp_log.h>
-#include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -38,77 +37,96 @@ auto constexpr IE_BUS_TX          = GPIO_NUM_3;
 auto constexpr IE_BUS_ENABLE      = GPIO_NUM_9;
 auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
 
-auto constexpr QUEUE_MAX_SIZE = 100;
+auto constexpr QUEUE_MAX_SIZE = 500;
 
 struct Context {
-  QueueHandle_t errorQueue   = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
-  QueueHandle_t messageQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+  QueueHandle_t errorQueue;
+  QueueHandle_t writeQueue;
+  QueueHandle_t messageQueue;
+
+  Context() {
+    errorQueue   = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::MessageError));
+    writeQueue   = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+    messageQueue = xQueueCreate(QUEUE_MAX_SIZE, sizeof(iebus::Message));
+
+    if (not errorQueue or not messageQueue) {
+      ESP_LOGE(TAG, "Failed to create queues!");
+    }
+  }
 };
 
-Context ctx;
+Context* ctx = nullptr;
 
 } // namespace
 
-auto busWorker(void* pvParameters) -> void {
-  auto& context = *static_cast<Context*>(pvParameters);
+[[noreturn]] auto busWorker(void* pvParameters) -> void {
+  auto const& context = *static_cast<Context*>(pvParameters);
 
-  iebus::Driver driver{IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE};
-  iebus::Controller controller{driver, IE_BUS_DEVICE_ADDR};
-  iebus::Processor processor{IE_BUS_DEVICE_ADDR};
+  iebus::Driver driver         = {IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE};
+  iebus::Controller controller = {driver, IE_BUS_DEVICE_ADDR};
+  iebus::Processor processor   = {IE_BUS_DEVICE_ADDR};
 
   driver.enable();
 
-  while (driver.isEnabled()) {
-    auto const result = controller.readMessage();
-    if (result) {
-      auto const value = result.value();
-      if (xQueueSend(context.messageQueue, &value, 0) != pdPASS) {
-        ESP_LOGW(TAG, "Message queue is full");
+  while (true) {
+    auto const readResult = controller.readMessage();
+
+    if (readResult.has_value()) {
+      auto const requestMessage = readResult.value();
+      xQueueSend(context.messageQueue, &requestMessage, 0);
+
+      auto const responseMessages = processor.processMessage(requestMessage);
+      for (auto const& responseMessage : responseMessages) {
+        xQueueSend(context.writeQueue, &responseMessage, 0);
       }
 
-      auto const messages = processor.processMessage(value);
-      for (auto const& message : messages) {
-        if (xQueueSend(context.messageQueue, &message, 0) != pdPASS) {
-          ESP_LOGW(TAG, "Message queue is full");
-        }
-
-        auto const isWritten = controller.writeMessage(message);
-        if (not isWritten) {
-          ESP_LOGE(TAG, "Couldn't write a message to the bus");
-        }
-      }
     } else {
-      auto const error = result.error();
+      auto const error = readResult.error();
       if (error >= iebus::MessageError::BROADCAST_BIT_READ_ERROR) {
-        if (xQueueSend(context.errorQueue, &error, 0) != pdPASS) {
-          ESP_LOGW(TAG, "Error queue is full");
+        xQueueSend(context.errorQueue, &error, 0);
+      }
+    }
+
+    iebus::Message message = {};
+
+    if (xQueueReceive(context.writeQueue, &message, 0)) {
+      auto const writeResult = controller.writeMessage(message);
+
+      if (writeResult.has_value()) {
+        xQueueSend(context.messageQueue, &message, 0);
+      } else {
+        xQueueSendToFront(context.writeQueue, &message, 0);
+
+        auto const error = writeResult.error();
+        if (error >= iebus::MessageError::BROADCAST_BIT_READ_ERROR) {
+          xQueueSend(context.errorQueue, &error, 0);
         }
       }
     }
   }
 }
 
-[[noreturn]] auto messageError(void* pvParameters) -> void {
-  auto& context = *static_cast<Context*>(pvParameters);
+[[noreturn]] auto messageErrorPrintWorker(void* pvParameters) -> void {
+  auto const& context = *static_cast<Context*>(pvParameters);
 
   iebus::MessageError messageError = {};
 
   while (true) {
     if (xQueueReceive(context.errorQueue, &messageError, portMAX_DELAY) == pdTRUE) {
-      iebus::printMessageError(messageError);
+      iebus::common::printMessageError(messageError);
     }
   }
 }
 
-[[noreturn]] auto messageProcess(void* pvParameters) -> void {
-  auto& context = *static_cast<Context*>(pvParameters);
+[[noreturn]] auto messageProcessWorker(void* pvParameters) -> void {
+  auto const& context = *static_cast<Context*>(pvParameters);
 
   //  USB usb;
   iebus::Message message = {};
 
   while (true) {
     if (xQueueReceive(context.messageQueue, &message, portMAX_DELAY) == pdTRUE) {
-      iebus::printMessage(message);
+      iebus::common::printMessage(message);
 
       //      usb.write({0x00, 0x12, 0x32, 0x44});
 
@@ -131,8 +149,10 @@ auto busWorker(void* pvParameters) -> void {
 }
 
 extern "C" void app_main() {
-  xTaskCreatePinnedToCore(messageError, "message_error", 4096, &ctx, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(messageProcess, "message_process", 4096, &ctx, 1, nullptr, 0);
+  ctx = new Context();
 
-  xTaskCreatePinnedToCore(busWorker, "bus_worker", 4096, &ctx, 10, nullptr, 1);
+  xTaskCreatePinnedToCore(messageErrorPrintWorker, "message_error", 4096, ctx, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(messageProcessWorker, "message_process", 4096, ctx, 2, nullptr, 0);
+
+  xTaskCreatePinnedToCore(busWorker, "ie_bus_worker", 4096, ctx, 24, nullptr, 1);
 }
