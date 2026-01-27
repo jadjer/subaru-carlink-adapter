@@ -13,7 +13,7 @@ set(SOURCES
 )
 
 set(PRIV_REQUIRES
-        esp_iebus
+        esp-iebus
         esp_driver_twai
 )
 

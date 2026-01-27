@@ -1,2 +1,2 @@
-# avc
-AVC adapter for Subaru Tribeca B9
+# Carlink
+Carlink Adapter for Subaru Tribeca B9
