@@ -21,7 +21,6 @@
 #include <iebus/Driver.hpp>
 #include <iebus/Processor.hpp>
 #include <iebus/common.hpp>
-#include <print>
 
 #include "MessageParser.hpp"
 #include "USB.hpp"
@@ -33,46 +32,91 @@ auto constexpr TAG = "Carlink";
 auto constexpr IE_BUS_RX          = 8;
 auto constexpr IE_BUS_TX          = 3;
 auto constexpr IE_BUS_ENABLE      = 9;
-auto constexpr IE_BUS_DEVICE_ADDR = 0x540;
+auto constexpr IE_BUS_DEVICE_ADDR = 0x150;
 
-QueueHandle_t messageQueue = xQueueCreate(100, sizeof(iebus::Message));
+struct Context {
+  QueueHandle_t messageErrorQueue = nullptr;
+  QueueHandle_t messagePrintQueue = nullptr;
+};
 
 } // namespace
 
-auto busWorker(void*) -> void {
-  auto const driver     = iebus::Driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
-  auto const controller = iebus::Controller(driver, IE_BUS_DEVICE_ADDR);
+auto busWorker(void* arg) -> void {
+  auto const context = static_cast<Context*>(arg);
 
-  auto processor = iebus::Processor(IE_BUS_DEVICE_ADDR);
+  auto queue      = xQueueCreate(100, sizeof(iebus::Message));
+  auto driver     = iebus::Driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
+  auto processor  = iebus::Processor(IE_BUS_DEVICE_ADDR);
+  auto controller = iebus::Controller(driver, IE_BUS_DEVICE_ADDR);
 
   driver.enable();
 
   while (driver.isEnabled()) {
-    auto const optMessage = controller.readMessage();
-    if (optMessage) {
-      auto const message = *optMessage;
-      xQueueSend(messageQueue, &message, 0);
+    auto const readResult = controller.readMessage();
+
+    if (readResult) {
+      auto const message = (*readResult);
+
+      xQueueSend(context->messagePrintQueue, &message, 0);
 
       for (auto const& answerMessage : processor.processMessage(message)) {
-        if (controller.writeMessage(answerMessage)) {
-          xQueueSend(messageQueue, &answerMessage, 0);
+        xQueueSend(queue, &answerMessage, 0);
+      }
+
+    } else {
+      auto const error = readResult.error();
+      if (error >= iebus::MessageError::BROADCAST_BIT_READ_ERROR) {
+        xQueueSend(context->messageErrorQueue, &error, 0);
+      }
+    }
+
+    if (driver.isBusFree()) {
+      iebus::Message message = {};
+
+      if (xQueueReceive(queue, &message, 0) == pdTRUE) {
+        auto const writeResult = controller.writeMessage(message);
+        if (writeResult) {
+          xQueueSend(context->messagePrintQueue, &message, 0);
+        } else {
+          xQueueSend(context->messageErrorQueue, &writeResult.error(), 0);
         }
       }
     }
   }
 }
 
-[[noreturn]] auto messageProcessWorker(void*) -> void {
+[[noreturn]] auto messageProcess(void* arg) -> void {
+  auto const context = static_cast<Context*>(arg);
+
   iebus::Message message = {};
 
   while (true) {
-    if (xQueueReceive(messageQueue, &message, portMAX_DELAY) == pdTRUE) {
+    if (xQueueReceive(context->messagePrintQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::common::printMessage(message);
     }
   }
 }
 
+[[noreturn]] auto messageErrorProcess(void* arg) -> void {
+  auto const context = static_cast<Context*>(arg);
+
+  iebus::MessageError messageError = {};
+
+  while (true) {
+    if (xQueueReceive(context->messageErrorQueue, &messageError, portMAX_DELAY) == pdTRUE) {
+      iebus::common::printMessageError(messageError);
+    }
+  }
+}
+
 extern "C" void app_main() {
-  xTaskCreatePinnedToCore(messageProcessWorker, "message_process", 4096, nullptr, 10, nullptr, 0);
-  xTaskCreatePinnedToCore(busWorker, "ie_bus_worker", 16384, nullptr, 24, nullptr, 1);
+  Context static context = {
+      .messageErrorQueue = xQueueCreate(10000, sizeof(iebus::MessageError)),
+      .messagePrintQueue = xQueueCreate(100, sizeof(iebus::Message)),
+  };
+
+  xTaskCreatePinnedToCore(messageProcess, "message_process", 8192, &context, 10, nullptr, 0);
+  xTaskCreatePinnedToCore(messageErrorProcess, "message_error_process", 8192, &context, 10, nullptr, 0);
+
+  xTaskCreatePinnedToCore(busWorker, "ie_bus_worker", 8192, &context, 24, nullptr, 1);
 }
