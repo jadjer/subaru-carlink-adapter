@@ -19,20 +19,20 @@
 #include <freertos/FreeRTOS.h>
 #include <iebus/Controller.hpp>
 #include <iebus/Driver.hpp>
-#include <iebus/Processor.hpp>
 #include <iebus/common.hpp>
 
-#include "MessageParser.hpp"
 #include "USB.hpp"
+#include "media/MessageParser.hpp"
+#include "media/device/AudioProcessor.hpp"
+#include "media/device/DisplayProcessor.hpp"
 
 namespace {
 
 auto constexpr TAG = "Carlink";
 
-auto constexpr IE_BUS_RX          = 8;
-auto constexpr IE_BUS_TX          = 3;
-auto constexpr IE_BUS_ENABLE      = 9;
-auto constexpr IE_BUS_DEVICE_ADDR = 0x150;
+auto constexpr IE_BUS_RX     = 8;
+auto constexpr IE_BUS_TX     = 3;
+auto constexpr IE_BUS_ENABLE = 9;
 
 struct Context {
   QueueHandle_t messageErrorQueue = nullptr;
@@ -44,10 +44,14 @@ struct Context {
 auto busWorker(void* arg) -> void {
   auto const context = static_cast<Context*>(arg);
 
-  auto queue      = xQueueCreate(100, sizeof(iebus::Message));
-  auto driver     = iebus::Driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
-  auto processor  = iebus::Processor(IE_BUS_DEVICE_ADDR);
-  auto controller = iebus::Controller(driver, IE_BUS_DEVICE_ADDR);
+  auto queue            = xQueueCreate(100, sizeof(iebus::Message));
+  auto driver           = iebus::Driver(IE_BUS_RX, IE_BUS_TX, IE_BUS_ENABLE);
+  auto controller       = iebus::Controller(driver);
+  auto audioProcessor   = AudioProcessor();
+  auto displayProcessor = DisplayProcessor();
+
+  controller.registerDevice(audioProcessor);
+  controller.registerDevice(displayProcessor);
 
   driver.enable();
 
@@ -57,11 +61,10 @@ auto busWorker(void* arg) -> void {
     if (readResult) {
       auto const message = (*readResult);
 
-      xQueueSend(context->messagePrintQueue, &message, 0);
+      for (auto const& answerMessage : audioProcessor.processMessage(message)) xQueueSend(queue, &answerMessage, 0);
+      for (auto const& answerMessage : displayProcessor.processMessage(message)) xQueueSend(queue, &answerMessage, 0);
 
-      for (auto const& answerMessage : processor.processMessage(message)) {
-        xQueueSend(queue, &answerMessage, 0);
-      }
+      xQueueSend(context->messagePrintQueue, &message, 0);
 
     } else {
       auto const error = readResult.error();
@@ -111,12 +114,12 @@ auto busWorker(void* arg) -> void {
 
 extern "C" void app_main() {
   Context static context = {
-      .messageErrorQueue = xQueueCreate(10000, sizeof(iebus::MessageError)),
+      .messageErrorQueue = xQueueCreate(1000, sizeof(iebus::MessageError)),
       .messagePrintQueue = xQueueCreate(100, sizeof(iebus::Message)),
   };
 
   xTaskCreatePinnedToCore(messageProcess, "message_process", 8192, &context, 10, nullptr, 0);
   xTaskCreatePinnedToCore(messageErrorProcess, "message_error_process", 8192, &context, 10, nullptr, 0);
 
-  xTaskCreatePinnedToCore(busWorker, "ie_bus_worker", 8192, &context, 24, nullptr, 1);
+  xTaskCreatePinnedToCore(busWorker, "ie_bus_worker", 32768, &context, 24, nullptr, 1);
 }

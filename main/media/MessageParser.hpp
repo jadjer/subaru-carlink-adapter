@@ -18,9 +18,9 @@
 
 #pragma once
 
-#include <iebus/Message.hpp>
+#include <iebus/types.hpp>
 
-enum class Command : iebus::Bit {
+enum class MediaCommand : iebus::Bit {
   UNKNOWN,
   PLAY,
   MUTE,
@@ -32,4 +32,4 @@ enum class Command : iebus::Bit {
   BUS_REGISTER_REQUEST,
 };
 
-auto messageParse(iebus::Message const& message) -> Command;
+auto messageParse(iebus::Message const& message) -> MediaCommand;

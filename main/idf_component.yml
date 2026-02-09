@@ -2,5 +2,5 @@ dependencies:
   idf: ^6.0.0
   espressif/esp_tinyusb: ^2.0.1~1
 
-  jadjer/esp_iebus:
-    git: https://github.com/jadjer/esp-iebus.git
+#  jadjer/esp_iebus:
+#    git: https://github.com/jadjer/esp-iebus.git

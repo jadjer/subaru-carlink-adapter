@@ -18,6 +18,6 @@
 
 #include "MessageParser.hpp"
 
-auto messageParse(iebus::Message const& message) -> Command {
-  return Command::UNKNOWN;
+auto messageParse(iebus::Message const& message) -> MediaCommand {
+  return MediaCommand::UNKNOWN;
 }

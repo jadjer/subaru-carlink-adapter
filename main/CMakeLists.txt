@@ -9,14 +9,14 @@ set(SOURCES
 
         CAN.cpp
         USB.cpp
-        MessageParser.cpp
 
-        AudioProcessor.cpp
-        DisplayProcessor.cpp
+        media/MessageParser.cpp
+        media/device/AudioProcessor.cpp
+        media/device/DisplayProcessor.cpp
 )
 
 set(PRIV_REQUIRES
-        esp_iebus
+        esp-iebus
         esp_driver_twai
 )
 
