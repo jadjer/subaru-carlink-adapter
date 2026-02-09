@@ -73,6 +73,9 @@ auto busWorker(void* arg) -> void {
       }
     }
 
+    for (auto const& msg : audioProcessor.update()) xQueueSend(queue, &msg, 0);
+    for (auto const& msg : displayProcessor.update()) xQueueSend(queue, &msg, 0);
+
     if (driver.isBusFree()) {
       iebus::Message message = {};
 
@@ -96,6 +99,8 @@ auto busWorker(void* arg) -> void {
   while (true) {
     if (xQueueReceive(context->messagePrintQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::common::printMessage(message);
+
+      auto const command = messageParse(message);
     }
   }
 }

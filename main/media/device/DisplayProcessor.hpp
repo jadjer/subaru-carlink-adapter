@@ -19,6 +19,7 @@
 #pragma once
 
 #include <iebus/Device.hpp>
+#include <iebus/Timer.hpp>
 #include <iebus/types.hpp>
 
 class DisplayProcessor : public iebus::Device {
@@ -33,15 +34,16 @@ private:
   [[nodiscard]] auto handleCommand10(iebus::Message const& message) noexcept -> iebus::Device::MessageList;
   [[nodiscard]] auto handleCommand20(iebus::Message const& message) noexcept -> iebus::Device::MessageList;
 
-private:
+public:
   [[nodiscard]] auto update() noexcept -> iebus::Device::MessageList override;
 
 private:
-  [[nodiscard]] auto createCommandInit() noexcept -> iebus::Device::MessageList;
-  [[nodiscard]] auto createCommandConfiguration(iebus::Message const& message) noexcept -> iebus::Device::MessageList;
+  iebus::Timer m_timer;
 
 private:
-  bool m_isConfigured  = false;
   bool m_isRegistered  = false;
   bool m_isInitialized = false;
+
+private:
+  iebus::Timer::Time m_lastUpdateTime = 0;
 };

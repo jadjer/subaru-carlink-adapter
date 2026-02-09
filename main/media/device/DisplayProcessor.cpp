@@ -20,7 +20,8 @@
 
 namespace {
 
-iebus::Address constexpr DEVICE_ADDRESS = 0x150;
+iebus::Address constexpr DEVICE_ADDRESS = 0x140;
+iebus::Timer::Time constexpr MICROSECONDS_PER_SECOND = 1'000'000;
 
 } // namespace
 
@@ -35,34 +36,33 @@ iebus::Device::MessageList DisplayProcessor::processMessage(iebus::Message const
   auto const command = message.data[0];
 
   if (command == 0x10) return handleCommand10(message);
-  if (not m_isInitialized) return createCommandInit();
 
-  if (command == 0x20) return handleCommand20(message);
-  if (not m_isRegistered) return {};
+  if (m_isInitialized) {
+    if (command == 0x20) return handleCommand20(message);
 
-  if (not m_isConfigured) return createCommandConfiguration(message);
+    if (m_isRegistered) {
+      if (command == 0x1F) return update();
+    }
+  }
 
-  if (command == 0x1F) return update();
-
-  return {};
-}
-
-auto DisplayProcessor::update() noexcept -> DisplayProcessor::MessageList {
   return {};
 }
 
 auto DisplayProcessor::handleCommand10(iebus::Message const& message) noexcept -> iebus::Device::MessageList {
   if (message.length < 2) return {};
 
-  m_isInitialized = true;
-
   m_isRegistered = false;
-  m_isConfigured = false;
+  m_isInitialized = true;
 
   auto const sessionIndex = message.data[1];
 
   return {
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 6, {0x11, sessionIndex, 0x01, 0x02, 0x85, 0x93}},
+      iebus::Message{
+                     m_address, message.master,
+                     iebus::BroadcastType::DEVICE,
+                     iebus::ControlType::WRITE_COMMAND,
+                     6, {0x11, sessionIndex, 0x01, 0x02, 0x85, 0x93},
+                     },
   };
 }
 
@@ -70,47 +70,124 @@ auto DisplayProcessor::handleCommand20(iebus::Message const& message) noexcept -
   if (message.length < 2) return {};
 
   m_isRegistered = false;
-  m_isConfigured = false;
 
   auto const registerIndex = message.data[1];
 
-//  if (registerIndex == 1)
-  //    return {
-  //        iebus::Message{
-  //                       m_address, message.master,
-  //                       iebus::BroadcastType::DEVICE,
-  //                       iebus::ControlType::WRITE_COMMAND,
-  //                       4, {0x40, 0xC0, 0x20, m_isInitialized},
-  //                       },
-  //    };
-  if (registerIndex == 2) m_isRegistered = true;
+  if (registerIndex == 0x01) {
+
+    m_isRegistered = true;
+
+    return {
+        iebus::Message{
+                       m_address,                    message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3,                            {0x40, 0x02, 0x10},
+                       },
+        iebus::Message{
+                       m_address,                            message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3, {0x40, 0x06, 0x10},
+                       },
+        iebus::Message{
+                       m_address,                            message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3,                    {0x40, 0xC0, 0x10},
+                       },
+        iebus::Message{
+                       m_address, message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3,                            {0x40, 0x83, 0x10},
+                       },
+        iebus::Message{
+                       m_address,                    message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3,                            {0x40, 0x02, 0x00},
+                       },
+        iebus::Message{
+                       m_address,                            message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3, {0x40, 0x06, 0x00},
+                       },
+        iebus::Message{
+                       m_address,                            message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3,                    {0x40, 0xC0, 0x00},
+                       },
+        iebus::Message{
+                       m_address, message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       3,                            {0x40, 0x83, 0x00},
+                       },
+        iebus::Message{
+                       m_address,                    message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       4,                            {0x40, 0x02, 0x02, 0x00},
+                       },
+        iebus::Message{
+                       m_address,                            message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       5, {0x40, 0x06, 0x02, 0x00, 0x01},
+                       },
+        iebus::Message{
+                       m_address,                            message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       5,                    {0x40, 0x06, 0x02, 0x00, 0x02},
+                       },
+        iebus::Message{
+                       m_address, message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       5,                            {0x40, 0x06, 0x02, 0x00, 0x10},
+                       },
+        iebus::Message{
+                       m_address,                    message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       2,                            {0x13, 0xFF},
+                       },
+        iebus::Message{
+                       m_address,                            message.master,
+                       iebus::BroadcastType::DEVICE,
+                       iebus::ControlType::WRITE_COMMAND,
+                       4, {0xD0, 0x31, 0x0B, 0x00},
+                       },
+    };
+  }
 
   return {};
 }
 
-auto DisplayProcessor::createCommandInit() noexcept -> iebus::Device::MessageList {
-  return {
-      iebus::Message{m_address, 0xFFF, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_COMMAND, 1, {0x12}},
-  };
-}
+auto DisplayProcessor::update() noexcept -> DisplayProcessor::MessageList {
+  auto const currentTime = m_timer.getTime();
+  auto const diffTime    = currentTime - m_lastUpdateTime;
 
-auto DisplayProcessor::createCommandConfiguration(iebus::Message const& message) noexcept -> DisplayProcessor::MessageList {
-  m_isConfigured = true;
+  if (not m_isInitialized) {
+    auto constexpr INIT_TIMEOUT = (1 * MICROSECONDS_PER_SECOND);
 
-  return {
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0x02, 0x10}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0x06, 0x10}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0xC0, 0x10}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0x83, 0x10}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0x02, 0x00}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0x06, 0x00}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0xC0, 0x00}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 3, {0x40, 0x83, 0x00}            },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 4, {0x40, 0x02, 0x02, 0x00}      },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 5, {0x40, 0x06, 0x02, 0x00, 0x01}},
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 5, {0x40, 0x06, 0x02, 0x00, 0x02}},
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 5, {0x40, 0x06, 0x02, 0x00, 0x10}},
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 2, {0x13, 0xFF}                  },
-      iebus::Message{m_address, message.master, iebus::BroadcastType::DEVICE, iebus::ControlType::WRITE_COMMAND, 4, {0xD0, 0x31, 0x0B, 0x00}      },
-  };
+    if (diffTime < INIT_TIMEOUT) return {};
+
+    m_lastUpdateTime = currentTime;
+
+    return {
+        iebus::Message{
+                       m_address, 0xFFF,
+                       iebus::BroadcastType::BROADCAST,
+                       iebus::ControlType::WRITE_COMMAND,
+                       1, {0x12},
+                       },
+    };
+  }
+
+  return {};
 }

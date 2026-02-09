@@ -20,12 +20,12 @@
 
 namespace {
 
-iebus::Address constexpr DEVICE_ADDRESS = 0x250;
+iebus::Address constexpr DEVICE_ADDRESS              = 0x230;
+iebus::Timer::Time constexpr MICROSECONDS_PER_SECOND = 1'000'000;
 
 } // namespace
 
 AudioProcessor::AudioProcessor() noexcept : iebus::Device(DEVICE_ADDRESS) {
-  m_playTime = 0;
 }
 
 auto AudioProcessor::processMessage(iebus::Message const& message) noexcept -> AudioProcessor::MessageList {
@@ -36,14 +36,16 @@ auto AudioProcessor::processMessage(iebus::Message const& message) noexcept -> A
   auto const command = message.data[0];
 
   if (command == 0x10) return handleCommand10(message);
-  if (not m_isInitialized) return createCommandInit();
 
-  if (command == 0x20) return handleCommand20(message);
-  if (not m_isRegistered) return {};
+  if (m_isInitialized) {
+    if (command == 0x20) return handleCommand20(message);
 
-  if (not m_isConfigured) return createCommandConfiguration();
-
-  if (command == 0x1F) return update();
+    if (m_isRegistered) {
+      if (command == 0x40) return handleCommand40(message);
+      if (command == 0x60) return handleCommand60(message);
+      if (command == 0x1F) return update();
+    }
+  }
 
   return {};
 }
@@ -51,17 +53,37 @@ auto AudioProcessor::processMessage(iebus::Message const& message) noexcept -> A
 auto AudioProcessor::handleCommand10(iebus::Message const& message) noexcept -> AudioProcessor::MessageList {
   if (message.length < 2) return {};
 
+  m_playTime      = 0;
+  m_isEnabled     = false;
+  m_isRegistered  = false;
   m_isInitialized = true;
 
-  m_isRegistered = false;
-  m_isConfigured = false;
+  auto const sessionIndex = message.data[1];
 
   return {
       iebus::Message{
-                     m_address, message.master,
+                     m_address,                       message.master,
                      iebus::BroadcastType::DEVICE,
                      iebus::ControlType::WRITE_COMMAND,
-                     5, {0x11, message.data[1], 0x00, 0x01, 0x02},
+                     5,                               {0x11, sessionIndex, 0x00, 0x01, 0x02},
+                     },
+      iebus::Message{
+                     m_address,                               0x100,
+                     iebus::BroadcastType::BROADCAST,
+                     iebus::ControlType::WRITE_DATA,
+                     9, {0x60, 0x22, 0x02, 0x11, 0x13, 0x00, 0x00, 0x00, 0x00},
+                     },
+      iebus::Message{
+                     m_address,                               0x100,
+                     iebus::BroadcastType::BROADCAST,
+                     iebus::ControlType::WRITE_DATA,
+                     22,                       {0x60, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0xBB, 0x01, 0x01, 0x01, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0x00},
+                     },
+      iebus::Message{
+                     m_address, 0x100,
+                     iebus::BroadcastType::BROADCAST,
+                     iebus::ControlType::WRITE_DATA,
+                     22,                               {0x60, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0xBB, 0x01, 0x58, 0x06, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0x00},
                      },
   };
 }
@@ -69,53 +91,114 @@ auto AudioProcessor::handleCommand10(iebus::Message const& message) noexcept -> 
 auto AudioProcessor::handleCommand20(iebus::Message const& message) noexcept -> iebus::Device::MessageList {
   if (message.length < 2) return {};
 
-  m_isRegistered = false;
-  m_isConfigured = false;
-
   auto const registerIndex = message.data[1];
 
-  if (registerIndex == 1) m_isRegistered = true;
+  if (registerIndex == 0x01) m_isRegistered = true;
 
   return {};
 }
 
-auto AudioProcessor::createCommandInit() noexcept -> AudioProcessor::MessageList {
+auto AudioProcessor::handleCommand40(iebus::Message const& message) noexcept -> iebus::Device::MessageList {
   return {
-      iebus::Message{m_address, 0xFFF, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_COMMAND, 1, {0x12}},
-  };
-}
-
-auto AudioProcessor::createCommandConfiguration() noexcept -> AudioProcessor::MessageList {
-  m_isConfigured = true;
-
-  return {
-      iebus::Message{m_address, 0x100, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_DATA, 9,  {0x60, 0x22, 0x02, 0x11, 0x13, 0x00, 0x00, 0x00, 0x00}                                                                                                                       },
-      iebus::Message{m_address, 0x100, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_DATA, 22, {0x60, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04,
-                                                                                                             0xBB, 0x01, 0x01, 0x01, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0x00}},
-      iebus::Message{m_address, 0x100, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_DATA, 22, {0x60, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04,
-                                                                                                             0xBB, 0x01, 0x58, 0x06, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0x00}},
       iebus::Message{
-                     m_address, 0x100, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_DATA, 13, {0x60, 0x22, 0x01, 0x06, 0x03, 0x63, 0x73, 0x59, 0x02, 0xFF, 0xFF, 0xFF, 0xFF}                                                                                               },
-      iebus::Message{m_address, 0x100, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_DATA, 9,  {0x60, 0x22, 0x02, 0x11, 0x13, 0x00, 0x00, 0x00, 0x00}                                                                                                                       },
-      iebus::Message{m_address, 0x100, iebus::BroadcastType::BROADCAST, iebus::ControlType::WRITE_DATA, 7,  {0x70, 0x22, 0x0A, 0x3F, 0x03, 0x2C, 0x02}                                                                                                                                   },
-  };
-}
-
-auto AudioProcessor::update() noexcept -> iebus::Device::MessageList {
-  m_playTime++;
-
-  if (m_playTime > 500) m_playTime = 0;
-
-  iebus::Bit const trackNumber = 0x34;
-  iebus::Bit const highNibble  = m_playTime / 60;
-  iebus::Bit const lowNibble   = m_playTime % 60;
-
-  return {
+                     m_address,                       0x100,
+                     iebus::BroadcastType::BROADCAST,
+                     iebus::ControlType::WRITE_DATA,
+                     22,                              {0x60, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0xBB, 0x01, 0x58, 0x06, 0x00, 0x00, 0x30, 0x30, 0x30, 0x30, 0x00},
+                     },
+      iebus::Message{
+                     m_address,                               0x100,
+                     iebus::BroadcastType::BROADCAST,
+                     iebus::ControlType::WRITE_DATA,
+                     13, {0x60, 0x22, 0x01, 0x06, 0x03, 0x63, 0x73, 0x59, 0x02, 0xFF, 0xFF, 0xFF, 0xFF},
+                     },
+      iebus::Message{
+                     m_address,                              0x100,
+                     iebus::BroadcastType::BROADCAST,
+                     iebus::ControlType::WRITE_DATA,
+                     9,                       {0x60, 0x22, 0x02, 0x11, 0x13, 0x00, 0x00, 0x00, 0x00},
+                     },
       iebus::Message{
                      m_address, 0x100,
                      iebus::BroadcastType::BROADCAST,
                      iebus::ControlType::WRITE_DATA,
-                     21, {0x22, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x04, 0xBB, 0x01, trackNumber, 0x02, highNibble, lowNibble, 0x30, 0x30, 0x30, 0x30, 0x00},
+                     7,                               {0x70, 0x22, 0x0A, 0x3F, 0x03, 0x2C, 0x02},
                      },
   };
+}
+
+auto AudioProcessor::handleCommand60(iebus::Message const& message) noexcept -> iebus::Device::MessageList {
+  if (message.length < 2) return {};
+
+  auto const subCommand = message.data[1];
+
+  if (subCommand == 0xC0) {
+    if (message.length < 10) return {};
+
+    auto const enableKey = message.data[9];
+
+    if (enableKey == 0x00) {
+      m_playTime = 0;
+      m_isEnabled = false;
+    }
+
+    if (enableKey == 0x22) {
+      m_playTime = 0;
+      m_isEnabled = true;
+    }
+  }
+
+  return update();
+}
+
+auto AudioProcessor::update() noexcept -> iebus::Device::MessageList {
+  auto const currentTime = m_timer.getTime();
+  auto const diffTime    = currentTime - m_lastUpdateTime;
+
+  if (not m_isInitialized) {
+    auto constexpr INIT_TIMEOUT = (1 * MICROSECONDS_PER_SECOND);
+
+    if (diffTime < INIT_TIMEOUT) return {};
+
+    m_lastUpdateTime = currentTime;
+
+    return {
+        iebus::Message{
+                       m_address, 0xFFF,
+                       iebus::BroadcastType::BROADCAST,
+                       iebus::ControlType::WRITE_COMMAND,
+                       1, {0x12},
+                       },
+    };
+  }
+
+  if (m_isEnabled) {
+    auto constexpr UPDATE_TIME = (1 * MICROSECONDS_PER_SECOND);
+
+    if (diffTime < UPDATE_TIME) return {};
+
+    m_lastUpdateTime = currentTime;
+
+    if (m_playTime > 500) m_playTime = 0;
+
+    iebus::Bit const trackNumber = 0x34;
+    iebus::Bit const minutes = (m_playTime / 60);
+    iebus::Bit const seconds = (m_playTime % 60);
+
+    m_playTime++;
+
+    iebus::Bit const highNibble = (0xB0 | (minutes % 10));
+    iebus::Bit const lowNibble = (((seconds / 10) << 4) | (seconds % 10));
+
+    return {
+        iebus::Message{
+                       m_address, 0x100,
+                       iebus::BroadcastType::BROADCAST,
+                       iebus::ControlType::WRITE_DATA,
+                       22, {0x60, 0x22, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x04, 0xBB, 0x01, trackNumber, 0x02, highNibble, lowNibble, 0x30, 0x30, 0x30, 0x30, 0x00},
+                       },
+    };
+  }
+
+  return {};
 }

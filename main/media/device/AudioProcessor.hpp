@@ -19,6 +19,7 @@
 #pragma once
 
 #include <iebus/Device.hpp>
+#include <iebus/Timer.hpp>
 #include <iebus/types.hpp>
 
 class AudioProcessor : public iebus::Device {
@@ -32,19 +33,21 @@ public:
 private:
   [[nodiscard]] auto handleCommand10(iebus::Message const& message) noexcept -> iebus::Device::MessageList;
   [[nodiscard]] auto handleCommand20(iebus::Message const& message) noexcept -> iebus::Device::MessageList;
+  [[nodiscard]] auto handleCommand40(iebus::Message const& message) noexcept -> iebus::Device::MessageList;
+  [[nodiscard]] auto handleCommand60(iebus::Message const& message) noexcept -> iebus::Device::MessageList;
 
-private:
+public:
   [[nodiscard]] auto update() noexcept -> iebus::Device::MessageList override;
 
 private:
-  [[nodiscard]] auto createCommandInit() noexcept -> iebus::Device::MessageList;
-  [[nodiscard]] auto createCommandConfiguration() noexcept -> iebus::Device::MessageList;
+  iebus::Timer m_timer;
 
 private:
-  bool m_isConfigured  = false;
+  bool m_isEnabled     = false;
   bool m_isRegistered  = false;
   bool m_isInitialized = false;
 
 private:
-  iebus::Data m_playTime = 0;
+  iebus::Data m_playTime              = 0;
+  iebus::Timer::Time m_lastUpdateTime = 0;
 };
