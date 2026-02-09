@@ -10,9 +10,8 @@ set(SOURCES
         CAN.cpp
         USB.cpp
 
-        media/MessageParser.cpp
-        media/device/AudioProcessor.cpp
-        media/device/DisplayProcessor.cpp
+        device/AudioProcessor.cpp
+        device/DisplayProcessor.cpp
 )
 
 set(PRIV_REQUIRES

@@ -22,9 +22,8 @@
 #include <iebus/common.hpp>
 
 #include "USB.hpp"
-#include "media/MessageParser.hpp"
-#include "media/device/AudioProcessor.hpp"
-#include "media/device/DisplayProcessor.hpp"
+#include "device/AudioProcessor.hpp"
+#include "device/DisplayProcessor.hpp"
 
 namespace {
 
@@ -99,8 +98,6 @@ auto busWorker(void* arg) -> void {
   while (true) {
     if (xQueueReceive(context->messagePrintQueue, &message, portMAX_DELAY) == pdTRUE) {
       iebus::common::printMessage(message);
-
-      auto const command = messageParse(message);
     }
   }
 }
